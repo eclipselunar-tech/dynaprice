@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, render_template
 from database import conectar
 from datetime import datetime
 
@@ -6,10 +6,7 @@ app = Flask(__name__)
 
 @app.route("/", methods=["GET"])
 def inicio():
-    return jsonify({
-        "mensagem": "Backend DynaPrice funcionando!",
-        "status": "ok"
-    })
+    return render_template("index.html")
 
 @app.route("/api/saude", methods=["GET"])
 def verificar_saude():
@@ -165,8 +162,6 @@ def cadastrar_produto():
 
     finally:
         conexao.close()
-
-
 
 # Rota de atualizacao de produto
 @app.route("/api/produtos/<codigo_barras>", methods=["PUT"])
