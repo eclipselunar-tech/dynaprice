@@ -15,6 +15,11 @@ def verificar_saude():
         "servidor": "Flask"
     })
 
+#termos
+@app.route("/termos")
+def termos():
+    return render_template("termos.html")
+
 #rota dos produtos
 @app.route("/api/produtos", methods=["GET"])
 def listar_produtos():
