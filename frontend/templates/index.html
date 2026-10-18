@@ -1,0 +1,374 @@
+
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DynaPrice | Painel</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <script src="{{ url_for('static', filename='js/script.js') }}" defer></script>
+</head>
+<body>
+    <aside class="sidebar">
+        <div class="brand">
+            <div class="brand-icon">D</div>
+            <div>
+                <h2>DynaPrice</h2>
+                <span>Gestão inteligente</span>
+            </div>
+        </div>
+
+        <p class="menu-label">MENU PRINCIPAL</p>
+
+        <nav>
+            <a href="#" class="menu-item active" data-view="dashboard">▦ <span>Dashboard</span></a>
+            <a href="#" class="menu-item" data-view="produtos">▤ <span>Produtos</span></a>
+            <a href="#" class="menu-item" data-view="estoque">▥ <span>Estoque</span></a>
+            <a href="#" class="menu-item" data-view="vendas">▣ <span>Vendas</span></a>
+            <a href="#" class="menu-item" data-view="etiquetas">▧ <span>Etiquetas eletrônicas</span></a>
+            <a href="#" class="menu-item" data-view="caixa">🛒 <span>Caixa / PDV</span></a>
+        </nav>
+
+        <div class="sidebar-footer">
+            <span class="status-dot"></span>
+            <span>Backend DynaPrice</span>
+            <strong id="api-status">Verificando...</strong>
+        </div>
+    </aside>
+
+    <main class="main-content">
+        <header class="topbar">
+            <div>
+                <p class="eyebrow">VISÃO GERAL</p>
+                <h1 id="page-title">Dashboard</h1>
+                <p class="subtitle">Acompanhe os dados e as operações do seu sistema.</p>
+            </div>
+            <div class="user-badge">DP</div>
+        </header>
+
+        <div id="dashboard-view" class="page-view">
+            <section class="welcome">
+                <div>
+                    <span class="welcome-tag">PAINEL DE CONTROLE</span>
+                    <h2>Bem-vindo ao DynaPrice</h2>
+                    <p>Gerencie produtos, acompanhe vendas e monitore suas etiquetas eletrônicas em um só lugar.</p>
+                </div>
+                <div class="welcome-symbol">↗</div>
+            </section>
+
+            <section class="section-heading">
+                <div>
+                    <h2>Resumo do sistema</h2>
+                    <p>Indicadores da operação</p>
+                </div>
+            </section>
+
+            <section class="stats-grid">
+                <article class="stat-card">
+                    <div class="stat-top">
+                        <span>Produtos cadastrados</span>
+                        <span class="stat-icon purple">▤</span>
+                    </div>
+                    <strong id="total-produtos">—</strong>
+                    <p>Produtos ativos no sistema</p>
+                </article>
+
+                <article class="stat-card">
+                    <div class="stat-top">
+                        <span>Vendas registradas</span>
+                        <span class="stat-icon blue">▣</span>
+                    </div>
+                    <strong id="total-vendas">—</strong>
+                    <p>Registros de vendas</p>
+                </article>
+
+                <article class="stat-card">
+                    <div class="stat-top">
+                        <span>Estoque baixo</span>
+                        <span class="stat-icon orange">▥</span>
+                    </div>
+                    <strong id="estoque-baixo">—</strong>
+                    <p>Produtos com até 5 unidades</p>
+                </article>
+
+                <article class="stat-card">
+                    <div class="stat-top">
+                        <span>Atualizações pendentes</span>
+                        <span class="stat-icon green">▧</span>
+                    </div>
+                    <strong id="etiquetas-pendentes">—</strong>
+                    <p>Etiquetas aguardando processamento</p>
+                </article>
+            </section>
+
+            <section class="dashboard-chart-grid">
+                <article class="panel chart-panel">
+                    <div class="panel-heading">
+                        <div>
+                            <h2>Faturamento por venda</h2>
+                            <p>Distribuição dos valores das vendas registradas por dia</p>
+                        </div>
+                        <span class="panel-symbol">↗</span>
+                    </div>
+
+                    <div class="chart-summary">
+                        <div>
+                            <span class="chart-label">Faturamento total registrado</span>
+                            <strong id="faturamento-total">R$ 0,00</strong>
+                        </div>
+                        <div>
+                            <span class="chart-label">Ticket médio</span>
+                            <strong id="ticket-medio">R$ 0,00</strong>
+                        </div>
+                    </div>
+
+                    <div class="chart-container">
+                        <canvas id="grafico-vendas" aria-label="Gráfico de faturamento diário" role="img"></canvas>
+                    </div>
+                    <p id="grafico-vendas-mensagem" class="chart-message"></p>
+                </article>
+
+                <article class="panel alerts-panel">
+                    <div class="panel-heading">
+                        <div>
+                            <h2>Alertas operacionais</h2>
+                            <p>Pontos que merecem atenção</p>
+                        </div>
+                        <span class="panel-symbol">!</span>
+                    </div>
+
+                    <div id="alertas-dashboard">
+                        <p class="loading">Carregando alertas...</p>
+                    </div>
+                </article>
+            </section>
+
+            <section class="bottom-grid">
+                <article class="panel">
+                    <div class="panel-heading">
+                        <div>
+                            <h2>Produtos recentes</h2>
+                            <p>Produtos cadastrados no sistema</p>
+                        </div>
+                        <span class="panel-symbol">▤</span>
+                    </div>
+                    <div id="lista-produtos" class="product-list">
+                        <p class="loading">Carregando produtos...</p>
+                    </div>
+                </article>
+
+                <article class="panel">
+                    <div class="panel-heading">
+                        <div>
+                            <h2>Status do sistema</h2>
+                            <p>Conexão com o backend</p>
+                        </div>
+                        <span class="panel-symbol">⌁</span>
+                    </div>
+                    <div class="system-status">
+                        <span class="status-dot"></span>
+                        <div>
+                            <strong id="status-titulo">Verificando conexão</strong>
+                            <p id="status-descricao">Consultando o servidor Flask...</p>
+                        </div>
+                    </div>
+                    <div class="info-row">
+                        <span>Servidor</span>
+                        <strong>Flask</strong>
+                    </div>
+                    <div class="info-row">
+                        <span>Banco de dados</span>
+                        <strong>SQLite</strong>
+                    </div>
+                    <div class="info-row">
+                        <span>Dispositivo físico</span>
+                        <strong class="muted">Integração futura</strong>
+                    </div>
+                </article>
+            </section>
+
+            <footer>
+                DynaPrice · Sistema inteligente de precificação
+            </footer>
+        </div>
+
+        <section id="produtos-view" class="page-view" hidden>
+            <div class="section-heading products-heading">
+                <div>
+                    <h2>Gestão de produtos</h2>
+                    <p>Consulte, pesquise e gerencie os produtos cadastrados.</p>
+                </div>
+                <button type="button" class="primary-button" id="novo-produto">
+                    + Novo produto
+                </button>
+            </div>
+
+            <section class="stats-grid products-stats">
+                <article class="stat-card">
+                    <div class="stat-top">
+                        <span>Total de produtos</span>
+                        <span class="stat-icon purple">▤</span>
+                    </div>
+                    <strong id="produtos-total">—</strong>
+                    <p>Produtos encontrados no cadastro</p>
+                </article>
+
+                <article class="stat-card">
+                    <div class="stat-top">
+                        <span>Estoque baixo</span>
+                        <span class="stat-icon orange">▥</span>
+                    </div>
+                    <strong id="produtos-baixo">—</strong>
+                    <p>Até 5 unidades disponíveis</p>
+                </article>
+
+                <article class="stat-card">
+                    <div class="stat-top">
+                        <span>Estoque zerado</span>
+                        <span class="stat-icon blue">!</span>
+                    </div>
+                    <strong id="produtos-zerados">—</strong>
+                    <p>Produtos sem unidades disponíveis</p>
+                </article>
+            </section>
+
+            <article class="panel products-panel">
+                <div class="products-toolbar">
+                    <div class="products-search">
+                        <label for="pesquisa-produtos">Pesquisar produtos</label>
+                        <div class="search-input-wrapper">
+                            <span aria-hidden="true">⌕</span>
+                            <input type="search" id="pesquisa-produtos"
+                                placeholder="Nome ou código de barras..."
+                                autocomplete="off">
+                        </div>
+                    </div>
+
+                    <div class="products-filter">
+                        <label for="filtro-categoria">Categoria</label>
+                        <select id="filtro-categoria">
+                            <option value="">Todas as categorias</option>
+                        </select>
+                    </div>
+
+                    <div class="products-filter">
+                        <label for="filtro-estoque">Situação do estoque</label>
+                        <select id="filtro-estoque">
+                            <option value="">Todas as situações</option>
+                            <option value="normal">Estoque normal</option>
+                            <option value="baixo">Estoque baixo</option>
+                            <option value="zerado">Estoque zerado</option>
+                        </select>
+                    </div>
+
+                    <button type="button" class="secondary-button" id="limpar-filtros">
+                        Limpar filtros
+                    </button>
+                </div>
+
+                <div class="products-results">
+                    <span id="produtos-resultado">Carregando produtos...</span>
+                </div>
+
+                <div id="produtos-lista-completa">
+                    <p class="loading">Carregando produtos...</p>
+                </div>
+            </article>
+        </section>
+
+        <section id="estoque-view" class="page-view" hidden>
+            <div class="section-heading">
+                <div>
+                    <h2>Estoque baixo</h2>
+                    <p>Produtos que precisam de atenção.</p>
+                </div>
+            </div>
+            <article class="panel">
+                <div id="estoque-lista">
+                    <p class="loading">Carregando estoque...</p>
+                </div>
+            </article>
+        </section>
+
+        <section id="vendas-view" class="page-view" hidden>
+            <div class="section-heading">
+                <div>
+                    <h2>Vendas registradas</h2>
+                    <p>Consulte os registros de vendas do sistema.</p>
+                </div>
+            </div>
+            <article class="panel">
+                <div id="vendas-lista">
+                    <p class="loading">Carregando vendas...</p>
+                </div>
+            </article>
+        </section>
+
+        <section id="etiquetas-view" class="page-view" hidden>
+            <div class="section-heading">
+                <div>
+                    <h2>Etiquetas eletrônicas</h2>
+                    <p>Acompanhe as atualizações pendentes.</p>
+                </div>
+            </div>
+            <article class="panel">
+                <div id="etiquetas-lista">
+                    <p class="loading">Carregando etiquetas...</p>
+                </div>
+            </article>
+        </section>
+
+        <!-- Tela do Caixa / PDV -->
+        <section id="caixa-view" class="page-view" hidden>
+            <div class="section-heading">
+                <div>
+                    <h2>Caixa / Ponto de Venda</h2>
+                    <p>Registre vendas e acompanhe os itens da compra.</p>
+                </div>
+            </div>
+
+            <div class="pdv-layout">
+                <section class="panel pdv-products">
+                    <h3>Adicionar produtos</h3>
+
+                    <label for="pdv-busca">Nome ou código de barras</label>
+                    <input
+                        type="search"
+                        id="pdv-busca"
+                        placeholder="Digite o nome ou leia o código..."
+                        autocomplete="off"
+                    >
+
+                    <div id="pdv-resultados">
+                        <p class="loading">Carregando produtos...</p>
+                    </div>
+                </section>
+
+                <section class="panel pdv-cart">
+                    <h3>Carrinho</h3>
+
+                    <div id="pdv-carrinho">
+                        <p class="loading">Nenhum produto adicionado.</p>
+                    </div>
+
+                    <div class="pdv-total">
+                        <span>Total da venda</span>
+                        <strong id="pdv-total">R$ 0,00</strong>
+                    </div>
+
+                    <button type="button" id="pdv-limpar" class="secondary-button">
+                        Limpar carrinho
+                    </button>
+
+                    <button type="button" id="pdv-finalizar" class="primary-button">
+                        Finalizar venda
+                    </button>
+
+                    <p id="pdv-mensagem" role="status" aria-live="polite"></p>
+                </section>
+            </div>
+        </section>
+
+    </main>
+</body>
+</html>
