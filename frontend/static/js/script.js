@@ -1,7 +1,5 @@
 
 document.addEventListener("DOMContentLoaded", () => {
-    carregarDashboard();
-
     const menus = document.querySelectorAll(".menu-item");
 
     menus.forEach((menu) => {
@@ -9,7 +7,6 @@ document.addEventListener("DOMContentLoaded", () => {
             evento.preventDefault();
 
             const secao = menu.dataset.view;
-
             if (!secao) return;
 
             menus.forEach((item) => {
@@ -20,22 +17,32 @@ document.addEventListener("DOMContentLoaded", () => {
                 view.hidden = view.id !== `${secao}-view`;
             });
 
-const titulos = {
-    dashboard: "Dashboard",
-    produtos: "Produtos",
-    estoque: "Estoque",
-    vendas: "Vendas",
-    etiquetas: "Etiquetas eletrônicas",
-    caixa: "Caixa / PDV"
-};
+            const titulos = {
+                dashboard: "Dashboard",
+                produtos: "Produtos",
+                estoque: "Estoque",
+                vendas: "Vendas",
+                etiquetas: "Etiquetas eletrônicas",
+                caixa: "Caixa / PDV"
+            };
 
             atualizarTexto("page-title", titulos[secao] || "DynaPrice");
 
-if (secao === "caixa") {
-    await pdvInicializar();
-}
+            try {
+                if (secao === "caixa") {
+                    await pdvInicializar();
+                } else if (secao === "dashboard") {
+                    await carregarDashboard();
+                } else {
+                    await carregarSecao(secao);
+                }
+            } catch (erro) {
+                console.error("Erro ao abrir a seção:", erro);
+            }
         });
     });
+
+    carregarDashboard();
 });
 
 async function buscarDados(url) {
