@@ -2,6 +2,20 @@
 document.addEventListener("DOMContentLoaded", () => {
     const menus = document.querySelectorAll(".menu-item");
 
+    const botaoSidebar = document.getElementById("toggle-sidebar");
+
+if (botaoSidebar) {
+    botaoSidebar.addEventListener("click", () => {
+        const escondida = document.body.classList.toggle("sidebar-hidden");
+
+        botaoSidebar.setAttribute("aria-expanded", String(!escondida));
+        botaoSidebar.setAttribute(
+            "aria-label",
+            escondida ? "Abrir menu lateral" : "Fechar menu lateral"
+        );
+    });
+}
+
     menus.forEach((menu) => {
         menu.addEventListener("click", async (evento) => {
             evento.preventDefault();
