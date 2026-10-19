@@ -9,14 +9,20 @@
     <script src="{{ url_for('static', filename='js/script.js') }}" defer></script>
 </head>
 <body>
-    <aside class="sidebar">
-        <div class="brand">
-            <div class="brand-icon">D</div>
-            <div>
-                <h2>DynaPrice</h2>
-                <span>Gestão inteligente</span>
-            </div>
-        </div>
+    <aside class="sidebar" id="sidebar">
+    <div class="brand">
+    <div class="brand-icon">
+        <img
+            src="{{ url_for('static', filename='img/logo.png') }}"
+            alt="Logo DynaPrice"
+        >
+    </div>
+    <div>
+        <h2>DynaPrice</h2>
+        <span>Gestão inteligente</span>
+    </div>
+</div>
+
 
         <p class="menu-label">MENU PRINCIPAL</p>
 
@@ -36,15 +42,31 @@
         </div>
     </aside>
 
-    <main class="main-content">
-        <header class="topbar">
+<main class="main-content">
+    <header class="topbar">
+        <div class="topbar-left">
+            <button
+                type="button"
+                id="toggle-sidebar"
+                class="sidebar-toggle"
+                aria-label="Abrir ou fechar menu lateral"
+                aria-expanded="true"
+                aria-controls="sidebar"
+            >
+                ☰
+            </button>
+
             <div>
                 <p class="eyebrow">VISÃO GERAL</p>
                 <h1 id="page-title">Dashboard</h1>
-                <p class="subtitle">Acompanhe os dados e as operações do seu sistema.</p>
+                <p class="subtitle">
+                    Acompanhe os dados e as operações do seu sistema.
+                </p>
             </div>
-            <div class="user-badge">DP</div>
-        </header>
+        </div>
+
+        <div class="user-badge">DP</div>
+    </header>
 
         <div id="dashboard-view" class="page-view">
             <section class="welcome">
