@@ -1,6 +1,7 @@
 from flask import Flask, jsonify, request, render_template
 from database import conectar
 from datetime import datetime
+import json
 
 app = Flask(__name__)
 
@@ -579,7 +580,7 @@ def listar_vendas():
 
     try:
         vendas = conexao.execute("""
-            SELECT id_venda, data_hora, valor_total
+            SELECT id_venda, data_hora, valor_total, status
             FROM vendas
             ORDER BY id_venda DESC
         """).fetchall()
@@ -590,7 +591,8 @@ def listar_vendas():
             lista_vendas.append({
                 "id_venda": venda["id_venda"],
                 "data_hora": venda["data_hora"],
-                "valor_total": venda["valor_total"]
+                "valor_total": venda["valor_total"],
+                "status": venda["status"]
             })
 
         return jsonify(lista_vendas), 200
@@ -613,7 +615,8 @@ def detalhar_venda(id_venda):
 
     try:
         venda = conexao.execute("""
-            SELECT id_venda, data_hora, valor_total
+            SELECT id_venda, data_hora, valor_total, status,
+                   data_hora_cancelamento, motivo_cancelamento
             FROM vendas
             WHERE id_venda = ?
         """, (id_venda,)).fetchone()
@@ -651,6 +654,9 @@ def detalhar_venda(id_venda):
             "id_venda": venda["id_venda"],
             "data_hora": venda["data_hora"],
             "valor_total": venda["valor_total"],
+            "status": venda["status"],
+            "data_hora_cancelamento": venda["data_hora_cancelamento"],
+            "motivo_cancelamento": venda["motivo_cancelamento"],
             "itens": lista_itens
         }), 200
 
@@ -659,6 +665,145 @@ def detalhar_venda(id_venda):
 
         return jsonify({
             "erro": "Nao foi possivel consultar a venda."
+        }), 500
+
+    finally:
+        conexao.close()
+
+
+
+# Rota para cancelar uma venda e devolver os produtos ao estoque
+@app.route("/api/vendas/<int:id_venda>/cancelar", methods=["POST"])
+def cancelar_venda(id_venda):
+    dados = request.get_json(silent=True) or {}
+
+    if not isinstance(dados, dict):
+        return jsonify({
+            "erro": "Envie os dados em formato JSON."
+        }), 400
+
+    motivo = dados.get("motivo")
+    if motivo is not None:
+        motivo = str(motivo).strip() or None
+
+    conexao = conectar()
+
+    try:
+        # Garante que a leitura, o cancelamento e a devolucao do estoque
+        # acontecam como uma unica operacao.
+        conexao.execute("BEGIN IMMEDIATE")
+
+        venda = conexao.execute("""
+            SELECT id_venda, data_hora, valor_total, status
+            FROM vendas
+            WHERE id_venda = ?
+        """, (id_venda,)).fetchone()
+
+        if venda is None:
+            conexao.rollback()
+            return jsonify({
+                "erro": "Venda nao encontrada."
+            }), 404
+
+        if venda["status"] == "CANCELADA":
+            conexao.rollback()
+            return jsonify({
+                "erro": "Esta venda ja foi cancelada.",
+                "status": venda["status"]
+            }), 409
+
+        itens = conexao.execute("""
+            SELECT
+                iv.id_produto,
+                iv.quantidade,
+                iv.preco_unitario,
+                iv.subtotal,
+                p.nome,
+                p.codigo_barras
+            FROM itens_venda iv
+            JOIN produtos p ON p.id_produto = iv.id_produto
+            WHERE iv.id_venda = ?
+        """, (id_venda,)).fetchall()
+
+        if not itens:
+            conexao.rollback()
+            return jsonify({
+                "erro": "A venda nao possui itens para devolver ao estoque."
+            }), 409
+
+        data_hora = datetime.now().isoformat(sep=" ", timespec="seconds")
+
+        dados_anteriores = {
+            "status": venda["status"],
+            "valor_total": venda["valor_total"],
+            "itens": [dict(item) for item in itens]
+        }
+        dados_novos = {
+            "status": "CANCELADA",
+            "valor_total": 0,
+            "itens_devolvidos_ao_estoque": len(itens)
+        }
+
+        # Atualiza o status antes de finalizar a transacao.
+        conexao.execute("""
+            UPDATE vendas
+            SET status = 'CANCELADA',
+                data_hora_atualizacao = ?,
+                data_hora_cancelamento = ?,
+                motivo_cancelamento = ?
+            WHERE id_venda = ? AND status = 'ATIVA'
+        """, (data_hora, data_hora, motivo, id_venda))
+
+        if conexao.execute("SELECT changes()").fetchone()[0] != 1:
+            raise RuntimeError("Nao foi possivel atualizar o status da venda.")
+
+        # Devolve cada quantidade ao estoque.
+        for item in itens:
+            conexao.execute("""
+                UPDATE produtos
+                SET estoque_atual = estoque_atual + ?
+                WHERE id_produto = ?
+            """, (item["quantidade"], item["id_produto"]))
+
+        # Registra o cancelamento no historico.
+        conexao.execute("""
+            INSERT INTO historico_vendas (
+                id_venda,
+                acao,
+                data_hora,
+                valor_total_anterior,
+                valor_total_novo,
+                motivo,
+                dados_anteriores,
+                dados_novos
+            )
+            VALUES (?, 'CANCELAMENTO', ?, ?, 0, ?, ?, ?)
+        """, (
+            id_venda,
+            data_hora,
+            venda["valor_total"],
+            motivo,
+            json.dumps(dados_anteriores, ensure_ascii=False),
+            json.dumps(dados_novos, ensure_ascii=False)
+        ))
+
+        conexao.commit()
+
+        return jsonify({
+            "mensagem": "Venda cancelada e estoque atualizado com sucesso.",
+            "id_venda": id_venda,
+            "status": "CANCELADA",
+            "valor_total_anterior": venda["valor_total"],
+            "quantidade_itens_devolvidos": len(itens),
+            "data_hora_cancelamento": data_hora,
+            "motivo": motivo
+        }), 200
+
+    except Exception:
+        conexao.rollback()
+        app.logger.exception("Erro ao cancelar venda")
+        return jsonify({
+            "erro": "Nao foi possivel cancelar a venda."
         }), 500
 
     finally:
