@@ -1,3 +1,6 @@
+
+
+
 document.addEventListener("DOMContentLoaded", () => {
     configurarNavegacao();
     carregarDashboard();
@@ -1462,6 +1465,7 @@ async function analisarProdutoIA() {
 
     botao.disabled = true;
     resultado.hidden = true;
+    document.getElementById("ia-decisao").hidden = true;
     mensagem.textContent = "Analisando produto...";
     try {
         const dados = await enviarDados(`/api/ia/produtos/${id}/analisar`, "POST", {});
@@ -1474,6 +1478,7 @@ async function analisarProdutoIA() {
         atualizarTexto("ia-motivo", dados.motivo ?? "Sem justificativa disponível.");
         atualizarTexto("ia-id-analise", dados.id_analise ?? "—");
         resultado.hidden = false;
+        configurarDecisaoIA(dados);
         mensagem.textContent = "Análise concluída. Nenhum preço foi alterado.";
         await carregarHistoricoIA();
     } catch (erro) {
@@ -1540,7 +1545,7 @@ async function carregarHistoricoIA() {
 
         if (registros.length === 0) {
             const celula = corpo.insertRow().insertCell();
-            celula.colSpan = 6;
+            celula.colSpan = 7;
             celula.textContent = "Nenhuma análise encontrada.";
         }
 
@@ -1563,7 +1568,8 @@ async function carregarHistoricoIA() {
                 registro.demanda,
                 preco(registro.preco_analisado),
                 preco(registro.preco_recomendado),
-                confianca
+                confianca,
+                registro.decisao === "APROVADA" ? "Aprovada" : registro.decisao === "REJEITADA" ? "Rejeitada" : "Pendente"
             ];
             for (const valor of valores) {
                 linha.insertCell().textContent = String(valor ?? "—");
@@ -1572,5 +1578,65 @@ async function carregarHistoricoIA() {
         mensagem.textContent = `${registros.length} análise(s) encontrada(s).`;
     } catch (erro) {
         mensagem.textContent = `Erro ao carregar histórico: ${erro.message}`;
+    }
+}
+
+
+let analiseAtualIA = null;
+
+function configurarDecisaoIA(dados) {
+    const painel = document.getElementById("ia-decisao");
+    const aprovar = document.getElementById("ia-aprovar");
+    const rejeitar = document.getElementById("ia-rejeitar");
+    const status = document.getElementById("ia-decisao-status");
+    if (!painel || !aprovar || !rejeitar || !status) return;
+
+    analiseAtualIA = dados;
+    painel.hidden = false;
+    status.textContent = "A aprovação altera o preço cadastrado e pode gerar uma atualização de etiqueta.";
+    const valido = Number.isInteger(Number(dados.id_analise)) && Number(dados.id_analise) > 0;
+    const diferente = Math.round(Number(dados.preco_atual) * 100) !== Math.round(Number(dados.preco_sugerido) * 100);
+    aprovar.disabled = !valido || !diferente;
+    rejeitar.disabled = !valido;
+    if (!diferente) status.textContent = "Preço sugerido igual ao atual. Não há alteração para aprovar.";
+
+    aprovar.onclick = () => decidirPrecoIA("aprovar");
+    rejeitar.onclick = () => decidirPrecoIA("rejeitar");
+}
+
+async function decidirPrecoIA(acao) {
+    if (!analiseAtualIA) return;
+    const id = Number(analiseAtualIA.id_analise);
+    const aprovar = document.getElementById("ia-aprovar");
+    const rejeitar = document.getElementById("ia-rejeitar");
+    const status = document.getElementById("ia-decisao-status");
+    const descricao = acao === "aprovar"
+        ? `Confirmar a alteração do preço de ${formatarPreco(analiseAtualIA.preco_atual)} para ${formatarPreco(analiseAtualIA.preco_sugerido)}?`
+        : "Confirmar a rejeição desta recomendação?";
+    if (!window.confirm(descricao)) return;
+    aprovar.disabled = true;
+    rejeitar.disabled = true;
+    status.textContent = "Registrando decisão...";
+    try {
+        const resposta = await enviarDados(`/api/ia/analises/${id}/${acao}`, "POST", {});
+        status.textContent =
+            resposta.mensagem || "Decisão registrada.";
+
+        const painelDecisao = document.getElementById("ia-decisao");
+
+        if (painelDecisao) {
+            painelDecisao.hidden = true;
+        }
+
+        analiseAtualIA = null;
+
+        await carregarHistoricoIA();
+        if (acao === "aprovar") {
+            await carregarTelaIA();
+        }
+    } catch (erro) {
+        status.textContent = `Não foi possível registrar a decisão: ${erro.message}`;
+        aprovar.disabled = acao === "aprovar" && Math.round(Number(analiseAtualIA.preco_atual) * 100) === Math.round(Number(analiseAtualIA.preco_sugerido) * 100);
+        rejeitar.disabled = false;
     }
 }
