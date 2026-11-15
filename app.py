@@ -1,9 +1,17 @@
 from flask import Flask, jsonify, request, render_template
-from database import conectar
+from database import conectar, CAMINHO_BANCO
 from datetime import datetime
 import json
 
+from dynaprice_ia import (
+    recalcular_preco,
+    ErroDynaPriceIA,
+    ProdutoNaoEncontrado,
+    ProdutoInativo
+)
+
 app = Flask(__name__)
+
 
 @app.route("/", methods=["GET"])
 def inicio():
@@ -82,7 +90,7 @@ def buscar_produto(codigo_barras):
 def cadastrar_produto():
     dados = request.get_json(silent=True)
 
-    if not dados:
+    if not isinstance(dados, dict) or not dados:
         return jsonify({
             "erro": "Envie os dados do produto em formato JSON."
         }), 400
@@ -99,6 +107,11 @@ def cadastrar_produto():
             return jsonify({
                 "erro": f"O campo '{campo}' e obrigatorio."
             }), 400
+
+    if isinstance(dados["preco_atual"], bool) or isinstance(dados["estoque_atual"], bool):
+        return jsonify({
+            "erro": "Preco e estoque devem ser valores numericos validos."
+        }), 400
 
     codigo = str(dados["codigo_barras"]).strip()
     nome = str(dados["nome"]).strip()
@@ -1008,6 +1021,7 @@ def listar_etiquetas():
     finally:
         conexao.close()
 
+
 # Rota para cadastrar uma etiqueta eletronica
 @app.route("/api/etiquetas", methods=["POST"])
 def cadastrar_etiqueta():
@@ -1052,6 +1066,7 @@ def cadastrar_etiqueta():
                 "erro": "Produto nao encontrado."
             }), 404
 
+        # Verifica se o identificador ja esta cadastrado.
         etiqueta_existente = conexao.execute("""
             SELECT id_etiqueta
             FROM etiquetas
@@ -1061,6 +1076,18 @@ def cadastrar_etiqueta():
         if etiqueta_existente is not None:
             return jsonify({
                 "erro": "Ja existe uma etiqueta com esse identificador."
+            }), 409
+
+        # Verifica se o produto ja possui uma etiqueta.
+        etiqueta_produto = conexao.execute("""
+            SELECT id_etiqueta
+            FROM etiquetas
+            WHERE id_produto = ?
+        """, (produto["id_produto"],)).fetchone()
+
+        if etiqueta_produto is not None:
+            return jsonify({
+                "erro": "Este produto ja possui uma etiqueta cadastrada."
             }), 409
 
         cursor = conexao.execute("""
@@ -1175,6 +1202,7 @@ def listar_atualizacoes_pendentes():
 
 
 # Rota para processar uma atualizacao pendente
+
 @app.route(
     "/api/etiquetas/atualizacoes/<int:id_atualizacao>/processar",
     methods=["POST"]
@@ -1209,14 +1237,12 @@ def processar_atualizacao_etiqueta(id_atualizacao):
                 "status_atual": atualizacao["status"]
             }), 409
 
-        # Esta etapa simula o processamento.
-        # Ainda nao existe confirmacao de envio ao ESP32.
-
         data_hora = datetime.now().isoformat(
             sep=" ",
             timespec="seconds"
         )
 
+        # Marca a atualizacao como processada em modo simulado.
         conexao.execute("""
             UPDATE atualizacoes_etiqueta
             SET status = ?
@@ -1227,6 +1253,40 @@ def processar_atualizacao_etiqueta(id_atualizacao):
             id_atualizacao
         ))
 
+        # Atualiza o preco registrado na etiqueta no banco.
+        conexao.execute("""
+            UPDATE etiquetas
+            SET preco_exibido = ?,
+                ultima_atualizacao = ?
+            WHERE id_etiqueta = ?
+        """, (
+            atualizacao["novo_preco"],
+            data_hora,
+            atualizacao["id_etiqueta"]
+        ))
+
+        # Verifica se ainda existem outras atualizacoes pendentes.
+        outras_pendentes = conexao.execute("""
+            SELECT COUNT(*)
+            FROM atualizacoes_etiqueta
+            WHERE id_etiqueta = ?
+              AND status = 'pendente'
+        """, (atualizacao["id_etiqueta"],)).fetchone()[0]
+
+        if outras_pendentes:
+            status_etiqueta = "pendente_atualizacao"
+        else:
+            status_etiqueta = "atualizada_simulada"
+
+        conexao.execute("""
+            UPDATE etiquetas
+            SET status = ?
+            WHERE id_etiqueta = ?
+        """, (
+            status_etiqueta,
+            atualizacao["id_etiqueta"]
+        ))
+
         conexao.commit()
 
         return jsonify({
@@ -1235,6 +1295,7 @@ def processar_atualizacao_etiqueta(id_atualizacao):
             "id_etiqueta": atualizacao["id_etiqueta"],
             "novo_preco": atualizacao["novo_preco"],
             "status": "processada_simulada",
+            "status_etiqueta": status_etiqueta,
             "confirmacao_dispositivo": False,
             "data_processamento": data_hora
         }), 200
@@ -1251,6 +1312,81 @@ def processar_atualizacao_etiqueta(id_atualizacao):
 
     finally:
         conexao.close()
+
+@app.route("/api/ia/produtos/<int:id_produto>/analisar", methods=["POST"])
+def analisar_preco_ia(id_produto):
+    try:
+        resultado = recalcular_preco(
+            id_produto,
+            caminho_banco=CAMINHO_BANCO
+        )
+
+        return jsonify(resultado), 200
+
+    except ProdutoNaoEncontrado as erro:
+        return jsonify({"erro": str(erro)}), 404
+
+    except ProdutoInativo as erro:
+        return jsonify({"erro": str(erro)}), 409
+
+    except ErroDynaPriceIA as erro:
+        app.logger.exception("Erro no módulo de IA")
+        return jsonify({"erro": str(erro)}), 500
+
+
+@app.route("/api/ia/historico", methods=["GET"])
+def listar_historico_ia():
+    id_produto = request.args.get("id_produto", type=int)
+
+    if id_produto is not None and id_produto <= 0:
+        return jsonify({"erro": "Produto inválido."}), 400
+
+    conexao = conectar()
+
+    try:
+        consulta = """
+            SELECT
+                a.id_analise,
+                a.id_produto,
+                p.nome AS produto,
+                a.data_hora,
+                a.demanda,
+                a.estoque_informado,
+                a.preco_analisado,
+                a.preco_recomendado,
+                a.confianca,
+                a.modelo
+            FROM analises_ia AS a
+            JOIN produtos AS p
+                ON p.id_produto = a.id_produto
+        """
+
+        parametros = []
+
+        if id_produto is not None:
+            consulta += " WHERE a.id_produto = ?"
+            parametros.append(id_produto)
+
+        consulta += """
+            ORDER BY a.data_hora DESC, a.id_analise DESC
+            LIMIT 100
+        """
+
+        registros = conexao.execute(
+            consulta, parametros
+        ).fetchall()
+
+        return jsonify([dict(registro) for registro in registros]), 200
+
+    except Exception:
+        app.logger.exception("Erro ao consultar histórico da IA")
+        return jsonify({
+            "erro": "Não foi possível consultar o histórico."
+        }), 500
+
+    finally:
+        conexao.close()
+
 
 if __name__ == "__main__":
     app.run(debug=True)
