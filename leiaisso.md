@@ -6,7 +6,7 @@ Resumo rápido da implementação do painel web e das rotas Flask. Este document
 
 ---
 
-## 1. Para o líder: o que foi desenvolvido
+## 1. O que foi desenvolvido
 
 Foi criado um **painel de gestão e ponto de venda (PDV)** acessado pelo navegador, usando **HTML, CSS e JavaScript** no frontend e **Python + Flask + SQLite** no backend.
 
