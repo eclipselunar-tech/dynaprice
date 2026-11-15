@@ -1,6 +1,7 @@
 from flask import Flask, jsonify, request, render_template
 from database import conectar, CAMINHO_BANCO
 from datetime import datetime
+from aprovacao_ia import aprovacao_ia, preparar_aprovacoes_ia
 import json
 
 from dynaprice_ia import (
@@ -11,6 +12,8 @@ from dynaprice_ia import (
 )
 
 app = Flask(__name__)
+app.register_blueprint(aprovacao_ia)
+preparar_aprovacoes_ia()
 
 
 @app.route("/", methods=["GET"])
@@ -1339,7 +1342,9 @@ def listar_historico_ia():
     id_produto = request.args.get("id_produto", type=int)
 
     if id_produto is not None and id_produto <= 0:
-        return jsonify({"erro": "Produto inválido."}), 400
+        return jsonify({
+            "erro": "Produto inválido."
+        }), 400
 
     conexao = conectar()
 
@@ -1355,8 +1360,16 @@ def listar_historico_ia():
                 a.preco_analisado,
                 a.preco_recomendado,
                 a.confianca,
-                a.modelo
+                a.modelo,
+
+                (
+                    SELECT d.decisao
+                    FROM decisoes_precos_ia AS d
+                    WHERE d.id_analise = a.id_analise
+                ) AS decisao
+
             FROM analises_ia AS a
+
             JOIN produtos AS p
                 ON p.id_produto = a.id_produto
         """
@@ -1368,25 +1381,33 @@ def listar_historico_ia():
             parametros.append(id_produto)
 
         consulta += """
-            ORDER BY a.data_hora DESC, a.id_analise DESC
+            ORDER BY
+                a.data_hora DESC,
+                a.id_analise DESC
             LIMIT 100
         """
 
         registros = conexao.execute(
-            consulta, parametros
+            consulta,
+            parametros
         ).fetchall()
 
-        return jsonify([dict(registro) for registro in registros]), 200
+        return jsonify([
+            dict(registro)
+            for registro in registros
+        ]), 200
 
     except Exception:
-        app.logger.exception("Erro ao consultar histórico da IA")
+        app.logger.exception(
+            "Erro ao consultar histórico da IA"
+        )
+
         return jsonify({
             "erro": "Não foi possível consultar o histórico."
         }), 500
 
     finally:
         conexao.close()
-
 
 if __name__ == "__main__":
     app.run(debug=True)
