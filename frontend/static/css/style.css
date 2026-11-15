@@ -1586,25 +1586,63 @@ footer {
     border-radius: 12px;
     background: var(--primary-soft);
 }
-
-.ia-decisao p {
-    margin-bottom: 12px;
-    color: var(--text);
-    font-size: 13px;
-}
-
-.ia-decisao-botoes {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
-}
-
+.ia-decisao p { margin-bottom: 12px; color: var(--text); font-size: 13px; }
+.ia-decisao-botoes { display: flex; flex-wrap: wrap; gap: 10px; }
 @media (max-width: 700px) {
-    .ia-decisao-botoes {
-        flex-direction: column;
-    }
-
-    .ia-decisao-botoes button {
-        width: 100%;
-    }
+    .ia-decisao-botoes { flex-direction: column; }
+    .ia-decisao-botoes button { width: 100%; }
 }
+
+.pdv-modal-overlay[hidden] { display: none !important; }
+.pdv-modal-overlay { position: fixed; inset: 0; z-index: 9999; background: rgba(10,25,45,.65); display: flex; justify-content: center; align-items: center; padding: 20px; backdrop-filter: blur(4px); }
+.pdv-modal { width: 100%; max-width: 460px; max-height: calc(100vh - 40px); overflow-y: auto; background: #fff; border-radius: 18px; padding: 28px; box-shadow: 0 25px 70px rgba(0,0,0,.25); animation: pdvModalEntrada .2s ease-out; }
+@keyframes pdvModalEntrada { from { opacity: 0; transform: translateY(12px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+.pdv-modal-cabecalho { display: flex; align-items: center; gap: 14px; margin-bottom: 24px; }
+.pdv-modal-icone { width: 52px; height: 52px; flex-shrink: 0; border-radius: 14px; background: #e6f7f2; display: flex; align-items: center; justify-content: center; font-size: 24px; }
+.pdv-modal-cabecalho h2 { font-size: 21px; color: #102d4d; margin: 0 0 5px; }
+.pdv-modal-cabecalho p { font-size: 13px; color: #64748b; margin: 0; }
+.pdv-modal-fechar { margin-left: auto; border: none; background: transparent; color: #64748b; font-size: 27px; cursor: pointer; }
+.pdv-modal-resumo { border-top: 1px solid #e2e8f0; padding-top: 20px; }
+.pdv-modal-linha { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 16px; color: #475569; font-size: 14px; }
+.pdv-modal-linha strong { color: #102d4d; }
+.pdv-modal-total { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 18px; margin-top: 20px; background: #eff9fc; border-radius: 12px; color: #102d4d; font-weight: 600; }
+.pdv-modal-total strong { font-size: 25px; color: #008eb4; }
+.pdv-modal-acoes { display: flex; gap: 12px; margin-top: 25px; }
+.pdv-modal-acoes button { flex: 1; padding: 13px; border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer; }
+.pdv-modal-cancelar { background: #f8fafc; border: 1px solid #d6e2ec; color: #102d4d; }
+.pdv-modal-confirmar { background: #0799bf; border: 1px solid #0799bf; color: #fff; }
+.pdv-modal-confirmar:hover { background: #007fa3; }
+.pdv-modal-acoes button:focus-visible, .pdv-modal-fechar:focus-visible { outline: 3px solid #008eb4; outline-offset: 3px; }
+@media (max-width: 480px) { .pdv-modal { padding: 20px; } .pdv-modal-acoes { flex-direction: column; } }
+@media (prefers-reduced-motion: reduce) { .pdv-modal { animation: none; } }
+
+.dp-dialogo-overlay[hidden] { display: none !important; }
+.dp-dialogo-overlay { position: fixed; inset: 0; z-index: 10010; background: rgba(10,25,45,.65); display: flex; align-items: center; justify-content: center; padding: 20px; backdrop-filter: blur(4px); }
+.dp-dialogo { width: 100%; max-width: 460px; padding: 28px; background: #fff; border-radius: 18px; box-shadow: 0 25px 70px rgba(0,0,0,.25); animation: pdvModalEntrada .2s ease-out; }
+.dp-dialogo-cabecalho { display: flex; align-items: flex-start; gap: 14px; }
+.dp-dialogo-icone { flex: 0 0 52px; height: 52px; display: grid; place-items: center; border-radius: 14px; background: #e7f7ef; color: #169b62; font-size: 26px; font-weight: 700; }
+.dp-dialogo-textos { min-width: 0; }
+.dp-dialogo-textos h2 { color: #102d4d; font-size: 21px; margin: 2px 0 8px; }
+.dp-dialogo-textos p { color: #475569; font-size: 14px; line-height: 1.55; margin: 0; white-space: pre-line; overflow-wrap: anywhere; }
+.dp-dialogo-acoes { display: flex; justify-content: flex-end; gap: 12px; margin-top: 28px; }
+.dp-dialogo-acoes button { min-width: 120px; padding: 12px 18px; border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer; }
+.dp-dialogo-cancelar { background: #f8fafc; border: 1px solid #d6e2ec; color: #102d4d; }
+.dp-dialogo-confirmar { background: #0799bf; border: 1px solid #0799bf; color: #fff; }
+.dp-dialogo-confirmar:hover { background: #007fa3; }
+.dp-dialogo--perigo .dp-dialogo-icone { background: #feecec; color: #c93442; }
+.dp-dialogo--perigo .dp-dialogo-confirmar { background: #c93442; border-color: #c93442; }
+.dp-dialogo--perigo .dp-dialogo-confirmar:hover { background: #ae2734; }
+.dp-dialogo--erro .dp-dialogo-icone { background: #feecec; color: #c93442; }
+.dp-dialogo--sucesso .dp-dialogo-icone { background: #e7f7ef; color: #169b62; }
+.dp-dialogo--info .dp-dialogo-icone { background: #e7f4fc; color: #078db5; }
+@media (max-width: 480px) { .dp-dialogo { padding: 20px; } .dp-dialogo-acoes { flex-direction: column-reverse; } .dp-dialogo-acoes button { width: 100%; } }
+
+.pdv-pagamento { border-top: 1px solid #e2e8f0; padding-top: 18px; margin-top: 20px; display: grid; gap: 10px; }
+.pdv-pagamento label { color: #102d4d; font-size: 13px; font-weight: 650; }
+.pdv-pagamento select, .pdv-pagamento input { width: 100%; min-height: 44px; border: 1px solid #d6e2ec; border-radius: 10px; background: #fff; padding: 10px 12px; color: #102d4d; font-size: 15px; }
+.pdv-pagamento select:focus-visible, .pdv-pagamento input:focus-visible { outline: 2px solid #0799bf; outline-offset: 2px; }
+.pdv-campo-dinheiro { display: grid; gap: 10px; }
+.pdv-campo-dinheiro[hidden] { display: none !important; }
+.pdv-campo-dinheiro .pdv-modal-linha { margin: 4px 0 0; }
+.pdv-pagamento-aviso { margin: 0; color: #55718e; font-size: 12px; line-height: 1.45; }
+.pdv-modal-confirmar:disabled { opacity: .55; cursor: not-allowed; }
