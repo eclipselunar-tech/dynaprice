@@ -1,0 +1,8 @@
+# Bibliotecas do módulo de IA do DynaPrice (versões testadas com Python 3.13)
+# Instalar com:  python -m pip install -r requirements.txt
+numpy>=2.0
+pandas>=2.2
+scikit-learn>=1.5
+joblib>=1.4
+# Só para rodar os testes:
+pytest>=8.0
