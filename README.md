@@ -1,4 +1,24 @@
-# TERMOS DE USO
+# Instruções para executar o DynaPrice
+
+**Pré-requisitos:**
+- Ter o Python instalado no computador.
+- Ter acesso à pasta completa do projeto DynaPrice.
+
+1. Abra a pasta do projeto no VS Code ou no Explorador de Arquivos.
+2. Abra o CMD (Prompt de Comando) dentro da pasta do projeto.
+3. Crie um ambiente virtual executando: python -m venv .venv
+4. Ative o ambiente virtual: .venv\Scripts\activate.bat
+5. Instale as dependências do projeto: python -m pip install -r requirements.txt
+6. Inicie o servidor Flask: python app.py
+7. Após iniciar o servidor, abra o navegador e acesse o endereço exibido no terminal pelo Flask.
+
+**Observações:**
+- Todos os comandos devem ser executados dentro da pasta principal do projeto.
+- O arquivo requirements.txt deve estar presente.
+- Para encerrar o servidor, pressione Ctrl + C no terminal.
+- Nas próximas execuções, não será necessário recriar o ambiente virtual nem reinstalar as bibliotecas. Basta ativar o ambiente e iniciar o sistema novamente.
+
+**TERMOS DE USO**
 
 Importante: O DynaPrice é um projeto desenvolvido no âmbito universitário, com finalidade exclusivamente acadêmica e sem fins lucrativos.
 
