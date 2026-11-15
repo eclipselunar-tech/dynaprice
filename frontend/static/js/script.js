@@ -1,20 +1,64 @@
 
-document.addEventListener("DOMContentLoaded", () => {
-    const menus = document.querySelectorAll(".menu-item");
 
+
+
+
+
+
+
+document.addEventListener("DOMContentLoaded", () => {
+    configurarNavegacao();
+    carregarDashboard();
+});
+
+const TITULOS_SECOES = {
+    dashboard: "Dashboard",
+    produtos: "Produtos",
+    estoque: "Estoque",
+    vendas: "Vendas",
+    etiquetas: "Etiquetas eletrônicas",
+    caixa: "Caixa / PDV",
+    ia: "Inteligência Artificial"
+};
+
+const CONFIGURACOES_SECOES = {
+    estoque: {
+        url: "/api/estoque",
+        destino: "estoque-lista",
+        tipo: "estoque"
+    },
+    vendas: {
+        url: "/api/vendas",
+        destino: "vendas-lista",
+        tipo: "vendas"
+    },
+    etiquetas: {
+        url: "/api/etiquetas/pendentes",
+        destino: "etiquetas-lista",
+        tipo: "etiquetas",
+        campo: "atualizacoes"
+    }
+};
+
+let pdvProdutos = [];
+let pdvCarrinho = [];
+let pdvVendaEmAndamento = false;
+
+function configurarNavegacao() {
+    const menus = document.querySelectorAll(".menu-item");
     const botaoSidebar = document.getElementById("toggle-sidebar");
 
-if (botaoSidebar) {
-    botaoSidebar.addEventListener("click", () => {
-        const escondida = document.body.classList.toggle("sidebar-hidden");
+    if (botaoSidebar) {
+        botaoSidebar.addEventListener("click", () => {
+            const escondida = document.body.classList.toggle("sidebar-hidden");
 
-        botaoSidebar.setAttribute("aria-expanded", String(!escondida));
-        botaoSidebar.setAttribute(
-            "aria-label",
-            escondida ? "Abrir menu lateral" : "Fechar menu lateral"
-        );
-    });
-}
+            botaoSidebar.setAttribute("aria-expanded", String(!escondida));
+            botaoSidebar.setAttribute(
+                "aria-label",
+                escondida ? "Abrir menu lateral" : "Fechar menu lateral"
+            );
+        });
+    }
 
     menus.forEach((menu) => {
         menu.addEventListener("click", async (evento) => {
@@ -31,19 +75,12 @@ if (botaoSidebar) {
                 view.hidden = view.id !== `${secao}-view`;
             });
 
-            const titulos = {
-                dashboard: "Dashboard",
-                produtos: "Produtos",
-                estoque: "Estoque",
-                vendas: "Vendas",
-                etiquetas: "Etiquetas eletrônicas",
-                caixa: "Caixa / PDV"
-            };
-
-            atualizarTexto("page-title", titulos[secao] || "DynaPrice");
+            atualizarTexto("page-title", TITULOS_SECOES[secao] || "DynaPrice");
 
             try {
-                if (secao === "caixa") {
+                if (secao === "ia") {
+                    await carregarTelaIA();
+                } else if (secao === "caixa") {
                     await pdvInicializar();
                 } else if (secao === "dashboard") {
                     await carregarDashboard();
@@ -51,37 +88,42 @@ if (botaoSidebar) {
                     await carregarSecao(secao);
                 }
             } catch (erro) {
-                console.error("Erro ao abrir a seção:", erro);
+                console.error(`Erro ao abrir a seção ${secao}:`, erro);
             }
         });
     });
-
-    carregarDashboard();
-});
+}
 
 async function buscarDados(url) {
     const resposta = await fetch(url);
+    const resultado = await resposta.json().catch(() => null);
 
     if (!resposta.ok) {
-        throw new Error(`Erro HTTP ${resposta.status}`);
+        throw new Error(
+            resultado?.erro || `Erro HTTP ${resposta.status}`
+        );
     }
 
-    return await resposta.json();
+    if (resultado === null) {
+        throw new Error("O servidor retornou uma resposta inválida.");
+    }
+
+    return resultado;
 }
 
 async function enviarDados(url, metodo, dados) {
     const resposta = await fetch(url, {
         method: metodo,
-        headers: {
-            "Content-Type": "application/json"
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(dados)
     });
 
-    const resultado = await resposta.json();
+    const resultado = await resposta.json().catch(() => ({}));
 
     if (!resposta.ok) {
-        throw new Error(resultado.erro || "Não foi possível concluir a operação.");
+        throw new Error(
+            resultado.erro || "Não foi possível concluir a operação."
+        );
     }
 
     return resultado;
@@ -89,19 +131,12 @@ async function enviarDados(url, metodo, dados) {
 
 function atualizarTexto(id, valor) {
     const elemento = document.getElementById(id);
-
-    if (elemento) {
-        elemento.textContent = valor;
-    }
+    if (elemento) elemento.textContent = valor;
 }
 
 function obterValor(objeto, campos, padrao = "—") {
     for (const campo of campos) {
-        if (
-            objeto &&
-            objeto[campo] !== undefined &&
-            objeto[campo] !== null
-        ) {
+        if (objeto?.[campo] !== undefined && objeto[campo] !== null) {
             return objeto[campo];
         }
     }
@@ -122,13 +157,19 @@ function formatarPreco(valor) {
     });
 }
 
-function criarElemento(tag, classe, texto) {
+function criarElemento(tag, classe = "", texto) {
     const elemento = document.createElement(tag);
 
     if (classe) elemento.className = classe;
     if (texto !== undefined) elemento.textContent = texto;
 
     return elemento;
+}
+
+function obterLista(resposta, campo = null) {
+    if (Array.isArray(resposta)) return resposta;
+    if (campo && Array.isArray(resposta?.[campo])) return resposta[campo];
+    return [];
 }
 
 async function carregarDashboard() {
@@ -141,37 +182,30 @@ async function carregarDashboard() {
                 buscarDados("/api/etiquetas/pendentes")
             ]);
 
-        const produtos = Array.isArray(produtosResposta)
-            ? produtosResposta
-            : produtosResposta.produtos || [];
-
-        const vendas = Array.isArray(vendasResposta)
-            ? vendasResposta
-            : vendasResposta.vendas || [];
+        const produtos = obterLista(produtosResposta, "produtos");
+        const vendas = obterLista(vendasResposta, "vendas");
 
         atualizarTexto("total-produtos", produtos.length);
         atualizarTexto("total-vendas", vendas.length);
-        renderizarGraficoVendas(vendas);
-        renderizarAlertasDashboard(estoque, etiquetas);
-
         atualizarTexto(
             "estoque-baixo",
             obterValor(
                 estoque,
                 ["quantidade_produtos"],
-                estoque.produtos?.length ?? 0
+                obterLista(estoque, "produtos").length
             )
         );
-
         atualizarTexto(
             "etiquetas-pendentes",
             obterValor(
                 etiquetas,
                 ["quantidade_pendentes"],
-                etiquetas.atualizacoes?.length ?? 0
+                obterLista(etiquetas, "atualizacoes").length
             )
         );
 
+        renderizarGraficoVendas(vendas);
+        renderizarAlertasDashboard(estoque, etiquetas);
         mostrarProdutos(produtos);
 
         atualizarTexto("api-status", "Conectado");
@@ -191,16 +225,12 @@ async function carregarDashboard() {
         );
 
         const lista = document.getElementById("lista-produtos");
-
-        if (lista) {
-            lista.textContent = "Não foi possível carregar os produtos.";
-        }
+        if (lista) lista.textContent = "Não foi possível carregar os produtos.";
     }
 }
 
 function mostrarProdutos(produtos) {
     const lista = document.getElementById("lista-produtos");
-
     if (!lista) return;
 
     lista.replaceChildren();
@@ -214,26 +244,28 @@ function mostrarProdutos(produtos) {
         const linha = criarElemento("div", "product-row");
         const informacoes = criarElemento("div");
 
-        const nome = criarElemento(
-            "div",
-            "product-name",
-            produto.nome || "Produto sem nome"
+        informacoes.append(
+            criarElemento(
+                "div",
+                "product-name",
+                produto.nome || "Produto sem nome"
+            ),
+            criarElemento(
+                "div",
+                "product-code",
+                `Código: ${produto.codigo_barras || "Não informado"}`
+            )
         );
 
-        const codigo = criarElemento(
-            "div",
-            "product-code",
-            `Código: ${produto.codigo_barras || "Não informado"}`
+        linha.append(
+            informacoes,
+            criarElemento(
+                "div",
+                "product-price",
+                formatarPreco(produto.preco_atual)
+            )
         );
 
-        const preco = criarElemento(
-            "div",
-            "product-price",
-            formatarPreco(produto.preco_atual)
-        );
-
-        informacoes.append(nome, codigo);
-        linha.append(informacoes, preco);
         lista.appendChild(linha);
     });
 }
@@ -244,49 +276,17 @@ async function carregarSecao(secao) {
         return;
     }
 
-    const configuracoes = {
-        estoque: {
-            url: "/api/estoque/baixo?limite=5",
-            destino: "estoque-lista",
-            campos: ["produtos"],
-            tipo: "estoque"
-        },
-        vendas: {
-            url: "/api/vendas",
-            destino: "vendas-lista",
-            campos: ["vendas"],
-            tipo: "vendas"
-        },
-        etiquetas: {
-            url: "/api/etiquetas/pendentes",
-            destino: "etiquetas-lista",
-            campos: ["atualizacoes"],
-            tipo: "etiquetas"
-        }
-    };
-
-    const config = configuracoes[secao];
-
+    const config = CONFIGURACOES_SECOES[secao];
     if (!config) return;
 
     const destino = document.getElementById(config.destino);
-
     if (!destino) return;
 
     destino.textContent = "Carregando dados...";
 
     try {
         const resposta = await buscarDados(config.url);
-        let registros = Array.isArray(resposta) ? resposta : [];
-
-        if (!Array.isArray(resposta)) {
-            for (const campo of config.campos) {
-                if (Array.isArray(resposta[campo])) {
-                    registros = resposta[campo];
-                    break;
-                }
-            }
-        }
+        const registros = obterLista(resposta, config.campo);
 
         mostrarRegistros(destino, registros, config.tipo);
     } catch (erro) {
@@ -298,7 +298,6 @@ async function carregarSecao(secao) {
 
 async function carregarProdutosCompletos() {
     const destino = document.getElementById("produtos-lista-completa");
-
     if (!destino) return;
 
     destino.textContent = "Carregando produtos...";
@@ -320,7 +319,6 @@ async function carregarProdutosCompletos() {
             "error-message",
             "Não foi possível carregar os produtos."
         );
-
         const tentarNovamente = criarElemento(
             "button",
             "btn-secondary",
@@ -328,12 +326,14 @@ async function carregarProdutosCompletos() {
         );
 
         tentarNovamente.type = "button";
-        tentarNovamente.addEventListener("click", carregarProdutosCompletos);
+        tentarNovamente.addEventListener(
+            "click",
+            carregarProdutosCompletos
+        );
 
         destino.append(mensagem, tentarNovamente);
     }
 }
-
 
 function renderizarTelaProdutos(destino, produtos) {
     destino.replaceChildren();
@@ -348,9 +348,7 @@ function renderizarTelaProdutos(destino, produtos) {
 
     destino.append(formularioArea, tabelaArea);
 
-    // Atualiza os indicadores usando todos os produtos carregados.
     atualizarTexto("produtos-total", produtos.length);
-
     atualizarTexto(
         "produtos-baixo",
         produtos.filter((produto) => {
@@ -358,20 +356,17 @@ function renderizarTelaProdutos(destino, produtos) {
             return Number.isFinite(estoque) && estoque > 0 && estoque <= 5;
         }).length
     );
-
     atualizarTexto(
         "produtos-zerados",
         produtos.filter((produto) => Number(produto.estoque_atual) === 0).length
     );
 
-    // Preenche as categorias disponíveis sem duplicá-las.
     if (filtroCategoria) {
         const categoriaAnterior = filtroCategoria.value;
-
         const categorias = [...new Set(
             produtos
                 .map((produto) => String(produto.categoria || "").trim())
-                .filter((categoria) => categoria !== "")
+                .filter(Boolean)
         )].sort((a, b) => a.localeCompare(b, "pt-BR"));
 
         filtroCategoria.replaceChildren(
@@ -385,35 +380,30 @@ function renderizarTelaProdutos(destino, produtos) {
             filtroCategoria.appendChild(opcao);
         });
 
-        if (categorias.includes(categoriaAnterior)) {
-            filtroCategoria.value = categoriaAnterior;
-        }
+        filtroCategoria.value = categorias.includes(categoriaAnterior)
+            ? categoriaAnterior
+            : "";
     }
 
     function atualizarTabela() {
         const termo = (busca?.value || "")
             .trim()
             .toLocaleLowerCase("pt-BR");
-
         const categoriaSelecionada = filtroCategoria?.value || "";
         const situacaoSelecionada = filtroEstoque?.value || "";
 
         const filtrados = produtos.filter((produto) => {
             const nome = String(produto.nome || "")
                 .toLocaleLowerCase("pt-BR");
-
             const codigo = String(produto.codigo_barras || "")
                 .toLocaleLowerCase("pt-BR");
-
             const categoria = String(produto.categoria || "").trim();
             const estoque = Number(produto.estoque_atual);
 
             const correspondePesquisa =
                 nome.includes(termo) || codigo.includes(termo);
-
             const correspondeCategoria =
-                !categoriaSelecionada ||
-                categoria === categoriaSelecionada;
+                !categoriaSelecionada || categoria === categoriaSelecionada;
 
             let correspondeEstoque = true;
 
@@ -440,14 +430,15 @@ function renderizarTelaProdutos(destino, produtos) {
         }
 
         renderizarTabelaProdutos(tabelaArea, filtrados, (produto) => {
-            mostrarFormularioProduto(formularioArea, produto, async () => {
-                await carregarProdutosCompletos();
-                await carregarDashboard();
-            });
+            mostrarFormularioProduto(formularioArea, produto, atualizarDados);
         });
     }
 
-    // Conecta os controles existentes no HTML.
+    async function atualizarDados() {
+        await carregarProdutosCompletos();
+        await carregarDashboard();
+    }
+
     if (busca) busca.oninput = atualizarTabela;
     if (filtroCategoria) filtroCategoria.onchange = atualizarTabela;
     if (filtroEstoque) filtroEstoque.onchange = atualizarTabela;
@@ -457,7 +448,6 @@ function renderizarTelaProdutos(destino, produtos) {
             if (busca) busca.value = "";
             if (filtroCategoria) filtroCategoria.value = "";
             if (filtroEstoque) filtroEstoque.value = "";
-
             atualizarTabela();
         };
     }
@@ -466,27 +456,23 @@ function renderizarTelaProdutos(destino, produtos) {
 
     if (novoProduto) {
         novoProduto.onclick = () => {
-            mostrarFormularioProduto(formularioArea, null, async () => {
-                await carregarProdutosCompletos();
-                await carregarDashboard();
-            });
+            mostrarFormularioProduto(formularioArea, null, atualizarDados);
         };
     }
 
     atualizarTabela();
 }
 
-
 function renderizarTabelaProdutos(destino, produtos, aoEditar) {
     destino.replaceChildren();
 
-    const resumo = criarElemento(
-        "p",
-        "products-count",
-        `${produtos.length} produto(s) encontrado(s)`
+    destino.appendChild(
+        criarElemento(
+            "p",
+            "products-count",
+            `${produtos.length} produto(s) encontrado(s)`
+        )
     );
-
-    destino.appendChild(resumo);
 
     if (!produtos.length) {
         destino.appendChild(
@@ -498,6 +484,7 @@ function renderizarTabelaProdutos(destino, produtos, aoEditar) {
     const tabela = criarElemento("table", "products-table");
     const cabecalho = criarElemento("thead");
     const linhaCabecalho = criarElemento("tr");
+    const corpo = criarElemento("tbody");
 
     [
         "Produto",
@@ -512,37 +499,30 @@ function renderizarTabelaProdutos(destino, produtos, aoEditar) {
 
     cabecalho.appendChild(linhaCabecalho);
 
-    const corpo = criarElemento("tbody");
-
     produtos.forEach((produto) => {
         const linha = criarElemento("tr");
-
-        linha.appendChild(criarElemento("td", "", produto.nome || "—"));
-        linha.appendChild(
-            criarElemento("td", "", produto.codigo_barras || "—")
-        );
-        linha.appendChild(
-            criarElemento("td", "", produto.categoria || "Sem categoria")
-        );
-        linha.appendChild(
-            criarElemento("td", "", formatarPreco(produto.preco_atual))
-        );
-
         const estoque = Number(produto.estoque_atual);
         const celulaEstoque = criarElemento(
             "td",
-            estoque <= 5 ? "stock-low" : "",
+            Number.isFinite(estoque) && estoque <= 5 ? "stock-low" : "",
             Number.isFinite(estoque) ? String(estoque) : "—"
         );
 
-        linha.appendChild(celulaEstoque);
+        linha.append(
+            criarElemento("td", "", produto.nome || "—"),
+            criarElemento("td", "", produto.codigo_barras || "—"),
+            criarElemento("td", "", produto.categoria || "Sem categoria"),
+            criarElemento("td", "", formatarPreco(produto.preco_atual)),
+            celulaEstoque
+        );
 
         const celulaAcoes = criarElemento("td");
         const editar = criarElemento("button", "btn-secondary", "Editar");
+
         editar.type = "button";
         editar.addEventListener("click", () => aoEditar(produto));
-
         celulaAcoes.appendChild(editar);
+
         linha.appendChild(celulaAcoes);
         corpo.appendChild(linha);
     });
@@ -566,7 +546,6 @@ function mostrarFormularioProduto(area, produto, aoSalvar) {
         "",
         editando ? "Editar produto" : "Cadastrar produto"
     );
-
     const aviso = criarElemento("p", "form-message");
     aviso.setAttribute("role", "status");
 
@@ -577,7 +556,6 @@ function mostrarFormularioProduto(area, produto, aoSalvar) {
         "text",
         true
     );
-
     const campoNome = criarCampoFormulario(
         "Nome do produto",
         "nome",
@@ -585,7 +563,6 @@ function mostrarFormularioProduto(area, produto, aoSalvar) {
         "text",
         true
     );
-
     const campoCategoria = criarCampoFormulario(
         "Categoria",
         "categoria",
@@ -593,7 +570,6 @@ function mostrarFormularioProduto(area, produto, aoSalvar) {
         "text",
         false
     );
-
     const campoPreco = criarCampoFormulario(
         "Preço atual (R$)",
         "preco_atual",
@@ -601,10 +577,6 @@ function mostrarFormularioProduto(area, produto, aoSalvar) {
         "number",
         true
     );
-
-    campoPreco.input.min = "0";
-    campoPreco.input.step = "0.01";
-
     const campoEstoque = criarCampoFormulario(
         "Estoque atual",
         "estoque_atual",
@@ -613,26 +585,24 @@ function mostrarFormularioProduto(area, produto, aoSalvar) {
         true
     );
 
+    campoPreco.input.min = "0";
+    campoPreco.input.step = "0.01";
     campoEstoque.input.min = "0";
     campoEstoque.input.step = "1";
 
-    if (editando) {
-        campoCodigo.input.readOnly = true;
-    }
+    if (editando) campoCodigo.input.readOnly = true;
 
     const botoes = criarElemento("div", "form-actions");
-
     const salvar = criarElemento(
         "button",
         "btn-primary",
         editando ? "Salvar alterações" : "Cadastrar produto"
     );
-    salvar.type = "submit";
-
     const cancelar = criarElemento("button", "btn-secondary", "Cancelar");
+
+    salvar.type = "submit";
     cancelar.type = "button";
     cancelar.addEventListener("click", () => area.replaceChildren());
-
     botoes.append(salvar, cancelar);
 
     formulario.append(
@@ -656,7 +626,7 @@ function mostrarFormularioProduto(area, produto, aoSalvar) {
         const precoTexto = campoPreco.input.value.trim();
         const estoqueTexto = campoEstoque.input.value.trim();
 
-        if (!codigo || !nome || precoTexto === "" || estoqueTexto === "") {
+        if (!codigo || !nome || !precoTexto || !estoqueTexto) {
             aviso.textContent = "Preencha todos os campos obrigatórios.";
             return;
         }
@@ -688,7 +658,6 @@ function mostrarFormularioProduto(area, produto, aoSalvar) {
         try {
             if (editando) {
                 delete dados.codigo_barras;
-
                 await enviarDados(
                     `/api/produtos/${encodeURIComponent(produto.codigo_barras)}`,
                     "PUT",
@@ -722,20 +691,18 @@ function mostrarFormularioProduto(area, produto, aoSalvar) {
 
 function criarCampoFormulario(rotulo, nome, valor, tipo, obrigatorio) {
     const container = criarElemento("label", "form-field");
+    const input = criarElemento("input", "form-input");
+
     container.appendChild(criarElemento("span", "", rotulo));
 
-    const input = criarElemento("input", "form-input");
     input.name = nome;
     input.type = tipo;
     input.value = valor;
     input.required = obrigatorio;
 
-    if (tipo === "text") {
-        input.autocomplete = "off";
-    }
+    if (tipo === "text") input.autocomplete = "off";
 
     container.appendChild(input);
-
     return { container, input };
 }
 
@@ -748,6 +715,7 @@ function mostrarRegistros(destino, registros, tipo) {
     }
 
     registros.forEach((registro) => {
+        const grupo = criarElemento("div", "data-row-group");
         const linha = criarElemento("div", "data-row");
         const informacoes = criarElemento("div");
         const nome = criarElemento("strong");
@@ -759,33 +727,240 @@ function mostrarRegistros(destino, registros, tipo) {
             detalhes.textContent =
                 `Código: ${registro.codigo_barras || "—"} · Categoria: ${registro.categoria || "Sem categoria"}`;
             valor.textContent = `Estoque: ${registro.estoque_atual ?? "—"}`;
+            informacoes.append(nome, detalhes);
+            linha.append(informacoes, valor);
         } else if (tipo === "vendas") {
-            nome.textContent = `Venda #${registro.id_venda ?? "—"}`;
-            detalhes.textContent = `Data: ${registro.data_hora || "Não informada"}`;
-            valor.textContent = formatarPreco(registro.valor_total);
+            renderizarRegistroVenda(
+                grupo,
+                linha,
+                informacoes,
+                nome,
+                detalhes,
+                valor,
+                registro
+            );
+            destino.appendChild(grupo);
+            return;
         } else {
-            nome.textContent = registro.identificador || `Etiqueta #${registro.id_etiqueta ?? "—"}`;
+            nome.textContent =
+                registro.identificador ||
+                `Etiqueta #${registro.id_etiqueta ?? "—"}`;
             detalhes.textContent =
                 `Produto: ${registro.nome_produto || registro.codigo_barras || "Não informado"}`;
-            valor.textContent = `${formatarPreco(registro.novo_preco)} · ${registro.status || "Pendente"}`;
+            valor.textContent =
+                `${formatarPreco(registro.novo_preco)} · ${registro.status || "Pendente"}`;
+            informacoes.append(nome, detalhes);
+            linha.append(informacoes, valor);
         }
 
-        informacoes.append(nome, detalhes);
-        linha.append(informacoes, valor);
-        destino.appendChild(linha);
+        grupo.appendChild(linha);
+        destino.appendChild(grupo);
     });
 }
 
+function renderizarRegistroVenda(
+    grupo,
+    linha,
+    informacoes,
+    nome,
+    detalhes,
+    valor,
+    registro
+) {
+    const status = String(registro.status || "ATIVA").toUpperCase();
+
+    nome.textContent = `Venda #${registro.id_venda ?? "—"}`;
+    detalhes.textContent =
+        `Data: ${registro.data_hora || "Não informada"} · Status: ${status}`;
+    valor.textContent = formatarPreco(registro.valor_total);
+    informacoes.append(nome, detalhes);
+
+    const acoes = criarElemento("div", "data-actions");
+    const botaoDetalhes = criarElemento(
+        "button",
+        "btn-secondary",
+        "Ver detalhes"
+    );
+    const painelDetalhes = criarElemento("div", "sale-details");
+
+    botaoDetalhes.type = "button";
+    painelDetalhes.hidden = true;
+
+    botaoDetalhes.addEventListener("click", async () => {
+        if (!painelDetalhes.hidden) {
+            painelDetalhes.hidden = true;
+            botaoDetalhes.textContent = "Ver detalhes";
+            return;
+        }
+
+        painelDetalhes.hidden = false;
+        botaoDetalhes.textContent = "Ocultar detalhes";
+
+        if (!painelDetalhes.dataset.carregado) {
+            await carregarDetalhesVenda(registro.id_venda, painelDetalhes);
+        }
+    });
+
+    acoes.appendChild(botaoDetalhes);
+
+    if (status === "ATIVA" && registro.id_venda != null) {
+        const botaoCancelar = criarElemento(
+            "button",
+            "btn-secondary",
+            "Cancelar venda"
+        );
+
+        botaoCancelar.type = "button";
+        botaoCancelar.addEventListener("click", async () => {
+            const confirmar = window.confirm(
+                `Deseja realmente cancelar a venda #${registro.id_venda}? O estoque será restaurado.`
+            );
+
+            if (!confirmar) return;
+
+            botaoCancelar.disabled = true;
+            botaoCancelar.textContent = "Cancelando...";
+
+            try {
+                await enviarDados(
+                    `/api/vendas/${encodeURIComponent(registro.id_venda)}/cancelar`,
+                    "POST",
+                    {}
+                );
+
+                alert("Venda cancelada com sucesso!");
+                await carregarSecao("vendas");
+                await carregarDashboard();
+            } catch (erro) {
+                console.error("Erro ao cancelar venda:", erro);
+                alert(`Não foi possível cancelar a venda: ${erro.message}`);
+                botaoCancelar.disabled = false;
+                botaoCancelar.textContent = "Cancelar venda";
+            }
+        });
+
+        acoes.appendChild(botaoCancelar);
+    }
+
+    linha.append(informacoes, valor, acoes);
+    grupo.append(linha, painelDetalhes);
+}
+
+async function carregarDetalhesVenda(idVenda, painel) {
+    painel.replaceChildren();
+    painel.appendChild(
+        criarElemento("p", "", "Carregando detalhes da venda...")
+    );
+
+    try {
+        const venda = await buscarDados(
+            `/api/vendas/${encodeURIComponent(idVenda)}`
+        );
+
+        painel.replaceChildren();
+
+        const titulo = criarElemento("h3", "", "Detalhes da venda");
+        const informacoes = criarElemento("div", "sale-info");
+
+        informacoes.append(
+            criarElemento("p", "", `Venda: #${venda.id_venda}`),
+            criarElemento(
+                "p",
+                "",
+                `Data: ${venda.data_hora || "Não informada"}`
+            ),
+            criarElemento("p", "", `Status: ${venda.status || "—"}`)
+        );
+
+        if (venda.data_hora_cancelamento) {
+            informacoes.appendChild(
+                criarElemento(
+                    "p",
+                    "",
+                    `Cancelamento: ${venda.data_hora_cancelamento}`
+                )
+            );
+        }
+
+        if (venda.motivo_cancelamento) {
+            informacoes.appendChild(
+                criarElemento(
+                    "p",
+                    "",
+                    `Motivo: ${venda.motivo_cancelamento}`
+                )
+            );
+        }
+
+        const tituloItens = criarElemento("h4", "", "Produtos vendidos");
+        const listaItens = criarElemento("div", "sale-items");
+
+        if (Array.isArray(venda.itens) && venda.itens.length) {
+            venda.itens.forEach((item) => {
+                const linhaItem = criarElemento("div", "sale-item");
+
+                linhaItem.append(
+                    criarElemento(
+                        "strong",
+                        "",
+                        item.nome || "Produto sem nome"
+                    ),
+                    criarElemento(
+                        "p",
+                        "",
+                        `Código: ${item.codigo_barras || "—"}`
+                    ),
+                    criarElemento("p", "", `Quantidade: ${item.quantidade}`),
+                    criarElemento(
+                        "p",
+                        "",
+                        `Preço unitário: ${formatarPreco(item.preco_unitario)}`
+                    ),
+                    criarElemento(
+                        "p",
+                        "",
+                        `Subtotal: ${formatarPreco(item.subtotal)}`
+                    )
+                );
+
+                listaItens.appendChild(linhaItem);
+            });
+        } else {
+            listaItens.textContent = "Nenhum item encontrado nesta venda.";
+        }
+
+        painel.append(
+            titulo,
+            informacoes,
+            tituloItens,
+            listaItens,
+            criarElemento(
+                "h3",
+                "sale-total",
+                `Total da venda: ${formatarPreco(venda.valor_total)}`
+            )
+        );
+
+        painel.dataset.carregado = "1";
+    } catch (erro) {
+        console.error("Erro ao carregar detalhes da venda:", erro);
+        painel.replaceChildren();
+        painel.appendChild(
+            criarElemento(
+                "p",
+                "error-message",
+                `Não foi possível carregar os detalhes: ${erro.message}`
+            )
+        );
+    }
+}
 
 function renderizarGraficoVendas(vendas) {
-    const canvas = document.getElementById("grafico-vendas");
+    const vendasAtivas = vendas.filter((venda) => {
+        return String(venda.status || "ATIVA").toUpperCase() === "ATIVA";
+    });
 
-    if (!canvas) return;
-
-    const contexto = canvas.getContext("2d");
-    const mensagem = document.getElementById("grafico-vendas-mensagem");
-
-    const total = vendas.reduce(
+    const total = vendasAtivas.reduce(
         (soma, venda) => soma + (Number(venda.valor_total) || 0),
         0
     );
@@ -793,16 +968,26 @@ function renderizarGraficoVendas(vendas) {
     atualizarTexto("faturamento-total", formatarPreco(total));
     atualizarTexto(
         "ticket-medio",
-        formatarPreco(vendas.length ? total / vendas.length : 0)
+        formatarPreco(vendasAtivas.length ? total / vendasAtivas.length : 0)
     );
+
+    const canvas = document.getElementById("grafico-vendas");
+    const mensagem = document.getElementById("grafico-vendas-mensagem");
+
+    if (!canvas) return;
+
+    const contexto = canvas.getContext("2d");
+    if (!contexto) {
+        if (mensagem) mensagem.textContent = "Não foi possível desenhar o gráfico.";
+        return;
+    }
 
     const porDia = {};
 
-    vendas.forEach((venda) => {
+    vendasAtivas.forEach((venda) => {
         if (!venda.data_hora) return;
 
         const data = new Date(venda.data_hora);
-
         if (Number.isNaN(data.getTime())) return;
 
         const chave = [
@@ -811,8 +996,8 @@ function renderizarGraficoVendas(vendas) {
             String(data.getDate()).padStart(2, "0")
         ].join("-");
 
-        porDia[chave] = (porDia[chave] || 0) +
-            (Number(venda.valor_total) || 0);
+        porDia[chave] =
+            (porDia[chave] || 0) + (Number(venda.valor_total) || 0);
     });
 
     const dias = Object.keys(porDia).sort().slice(-7);
@@ -829,7 +1014,6 @@ function renderizarGraficoVendas(vendas) {
     if (!largura || !altura) return;
 
     const escala = window.devicePixelRatio || 1;
-
     canvas.width = largura * escala;
     canvas.height = altura * escala;
 
@@ -844,11 +1028,7 @@ function renderizarGraficoVendas(vendas) {
         contexto.fillStyle = "#8790a3";
         contexto.font = "13px Segoe UI, Arial";
         contexto.textAlign = "center";
-        contexto.fillText(
-            "Sem dados disponíveis",
-            largura / 2,
-            altura / 2
-        );
+        contexto.fillText("Sem dados disponíveis", largura / 2, altura / 2);
         return;
     }
 
@@ -858,9 +1038,9 @@ function renderizarGraficoVendas(vendas) {
     contexto.font = "10px Segoe UI, Arial";
     contexto.textAlign = "right";
 
-    for (let i = 0; i <= 4; i++) {
-        const y = margem.topo + areaAltura * i / 4;
-        const valor = maiorValor * (4 - i) / 4;
+    for (let indice = 0; indice <= 4; indice++) {
+        const y = margem.topo + areaAltura * indice / 4;
+        const valor = maiorValor * (4 - indice) / 4;
 
         contexto.strokeStyle = "#e9edf4";
         contexto.lineWidth = 1;
@@ -885,9 +1065,7 @@ function renderizarGraficoVendas(vendas) {
             ? margem.esquerda + areaLargura / 2
             : margem.esquerda +
               areaLargura * indice / (dias.length - 1);
-
-        const y = margem.topo +
-            areaAltura * (1 - valor / maiorValor);
+        const y = margem.topo + areaAltura * (1 - valor / maiorValor);
 
         return { x, y };
     });
@@ -915,30 +1093,19 @@ function renderizarGraficoVendas(vendas) {
         contexto.fillStyle = "#8790a3";
         contexto.textAlign = "center";
 
-        const partes = dias[indice].split("-");
-        contexto.fillText(
-            `${partes[2]}/${partes[1]}`,
-            ponto.x,
-            altura - 10
-        );
+        const [ano, mes, dia] = dias[indice].split("-");
+        contexto.fillText(`${dia}/${mes}`, ponto.x, altura - 10);
     });
 }
 
 function renderizarAlertasDashboard(estoque, etiquetas) {
     const destino = document.getElementById("alertas-dashboard");
-
     if (!destino) return;
 
     destino.replaceChildren();
 
-    const produtosBaixos = Array.isArray(estoque)
-        ? estoque
-        : estoque.produtos || [];
-
-    const pendentes = Array.isArray(etiquetas)
-        ? etiquetas
-        : etiquetas.atualizacoes || [];
-
+    const produtosBaixos = obterLista(estoque, "produtos");
+    const pendentes = obterLista(etiquetas, "atualizacoes");
     const alertas = [];
 
     if (produtosBaixos.length) {
@@ -963,14 +1130,16 @@ function renderizarAlertasDashboard(estoque, etiquetas) {
         const linha = criarElemento("div", "alert-item");
         const icone = criarElemento("div", "alert-icon info", "✓");
         const informacoes = criarElemento("div");
-        const titulo = criarElemento("strong", "", "Nenhum alerta encontrado");
-        const descricao = criarElemento(
-            "p",
-            "",
-            "Não foram encontrados alertas nas consultas realizadas."
+
+        informacoes.append(
+            criarElemento("strong", "", "Nenhum alerta encontrado"),
+            criarElemento(
+                "p",
+                "",
+                "Não foram encontrados alertas nas consultas realizadas."
+            )
         );
 
-        informacoes.append(titulo, descricao);
         linha.append(icone, informacoes);
         destino.appendChild(linha);
         return;
@@ -983,21 +1152,17 @@ function renderizarAlertasDashboard(estoque, etiquetas) {
             `alert-icon ${alerta.classe}`,
             alerta.simbolo
         );
-
         const informacoes = criarElemento("div");
-        const titulo = criarElemento("strong", "", alerta.titulo);
-        const descricao = criarElemento("p", "", alerta.descricao);
 
-        informacoes.append(titulo, descricao);
+        informacoes.append(
+            criarElemento("strong", "", alerta.titulo),
+            criarElemento("p", "", alerta.descricao)
+        );
+
         linha.append(icone, informacoes);
         destino.appendChild(linha);
     });
 }
-
-
-let pdvProdutos = [];
-let pdvCarrinho = [];
-let pdvVendaEmAndamento = false;
 
 function pdvMoeda(valor) {
     return formatarPreco(valor);
@@ -1012,7 +1177,6 @@ async function pdvInicializar() {
 
     if (!busca.dataset.pdvAtivo) {
         busca.dataset.pdvAtivo = "1";
-
         busca.addEventListener("input", pdvMostrarProdutos);
 
         busca.addEventListener("keydown", (evento) => {
@@ -1021,11 +1185,10 @@ async function pdvInicializar() {
             evento.preventDefault();
 
             const codigo = busca.value.trim();
-
             if (!codigo) return;
 
             const produto = pdvProdutos.find(
-                item => String(item.codigo_barras) === codigo
+                (item) => String(item.codigo_barras) === codigo
             );
 
             if (produto) {
@@ -1051,18 +1214,13 @@ async function pdvInicializar() {
 
 async function pdvCarregarProdutos() {
     const resultados = document.getElementById("pdv-resultados");
-
     if (!resultados) return;
 
     resultados.textContent = "Carregando produtos...";
 
     try {
         const resposta = await buscarDados("/api/produtos");
-
-        pdvProdutos = Array.isArray(resposta)
-            ? resposta
-            : resposta.produtos || [];
-
+        pdvProdutos = obterLista(resposta, "produtos");
         pdvMostrarProdutos();
     } catch (erro) {
         console.error("Erro ao carregar produtos do PDV:", erro);
@@ -1079,7 +1237,6 @@ function pdvMostrarProdutos() {
     resultados.replaceChildren();
 
     const termo = busca.value.trim().toLocaleLowerCase("pt-BR");
-
     const encontrados = pdvProdutos.filter((produto) => {
         const nome = String(produto.nome || "").toLocaleLowerCase("pt-BR");
         const codigo = String(produto.codigo_barras || "").toLowerCase();
@@ -1096,17 +1253,15 @@ function pdvMostrarProdutos() {
         const linha = criarElemento("div", "pdv-product");
         const info = criarElemento("div", "pdv-product-info");
         const nome = criarElemento("strong", "", produto.nome || "Sem nome");
-
         const detalhe = criarElemento(
             "span",
             "",
-            `Código: ${produto.codigo_barras || "—"} · ${pdvMoeda(produto.preco_atual)} · Estoque: ${produto.estoque_atual}`
+            `Código: ${produto.codigo_barras || "—"} · ${pdvMoeda(produto.preco_atual)} · Estoque: ${produto.estoque_atual ?? "—"}`
         );
-
         const botao = criarElemento("button", "secondary-button", "Adicionar");
+
         botao.type = "button";
         botao.disabled = Number(produto.estoque_atual) <= 0;
-
         botao.addEventListener("click", () => pdvAdicionar(produto));
 
         info.append(nome, detalhe);
@@ -1122,14 +1277,12 @@ function pdvMensagem(texto) {
 function pdvAdicionar(produto) {
     const estoque = Number(produto.estoque_atual);
     const codigo = String(produto.codigo_barras);
-
     const existente = pdvCarrinho.find(
-        item => item.codigo_barras === codigo
+        (item) => item.codigo_barras === codigo
     );
-
     const quantidadeAtual = existente ? existente.quantidade : 0;
 
-    if (quantidadeAtual >= estoque) {
+    if (!Number.isInteger(estoque) || estoque <= quantidadeAtual) {
         pdvMensagem("Quantidade maior que o estoque disponível.");
         return;
     }
@@ -1152,7 +1305,6 @@ function pdvAdicionar(produto) {
 
 function pdvMostrarCarrinho() {
     const area = document.getElementById("pdv-carrinho");
-
     if (!area) return;
 
     area.replaceChildren();
@@ -1165,36 +1317,31 @@ function pdvMostrarCarrinho() {
         const linha = criarElemento("div", "pdv-cart-item");
         const info = criarElemento("div", "pdv-product-info");
         const nome = criarElemento("strong", "", item.nome);
-
         const detalhe = criarElemento(
             "span",
             "",
             `${item.quantidade} × ${pdvMoeda(item.preco)} = ${pdvMoeda(item.quantidade * item.preco)}`
         );
-
         const acoes = criarElemento("div", "pdv-cart-actions");
-
         const menos = criarElemento("button", "secondary-button", "−");
+        const mais = criarElemento("button", "secondary-button", "+");
+        const remover = criarElemento("button", "secondary-button", "Remover");
+
         menos.type = "button";
         menos.setAttribute("aria-label", `Diminuir ${item.nome}`);
-
         menos.addEventListener("click", () => {
             if (item.quantidade > 1) {
                 item.quantidade--;
             } else {
-                pdvCarrinho = pdvCarrinho.filter(
-                    outro => outro !== item
-                );
+                pdvCarrinho = pdvCarrinho.filter((outro) => outro !== item);
             }
 
             pdvMostrarCarrinho();
         });
 
-        const mais = criarElemento("button", "secondary-button", "+");
         mais.type = "button";
         mais.disabled = item.quantidade >= item.estoque;
         mais.setAttribute("aria-label", `Aumentar ${item.nome}`);
-
         mais.addEventListener("click", () => {
             if (item.quantidade < item.estoque) {
                 item.quantidade++;
@@ -1202,14 +1349,9 @@ function pdvMostrarCarrinho() {
             }
         });
 
-        const remover = criarElemento("button", "secondary-button", "Remover");
         remover.type = "button";
-
         remover.addEventListener("click", () => {
-            pdvCarrinho = pdvCarrinho.filter(
-                outro => outro !== item
-            );
-
+            pdvCarrinho = pdvCarrinho.filter((outro) => outro !== item);
             pdvMostrarCarrinho();
         });
 
@@ -1227,7 +1369,6 @@ function pdvMostrarCarrinho() {
     atualizarTexto("pdv-total", pdvMoeda(total));
 
     const finalizar = document.getElementById("pdv-finalizar");
-
     if (finalizar) {
         finalizar.disabled =
             pdvCarrinho.length === 0 || pdvVendaEmAndamento;
@@ -1243,14 +1384,13 @@ async function pdvFinalizarVenda() {
     }
 
     pdvVendaEmAndamento = true;
-
     if (finalizar) finalizar.disabled = true;
 
     pdvMensagem("Registrando venda...");
 
     try {
         const resposta = await enviarDados("/api/vendas", "POST", {
-            itens: pdvCarrinho.map(item => ({
+            itens: pdvCarrinho.map((item) => ({
                 codigo_barras: item.codigo_barras,
                 quantidade: item.quantidade
             }))
@@ -1265,16 +1405,180 @@ async function pdvFinalizarVenda() {
 
         await pdvCarregarProdutos();
         await carregarDashboard();
-
     } catch (erro) {
         console.error("Erro ao finalizar venda:", erro);
-
-        pdvMensagem(
-            `Não foi possível concluir a venda: ${erro.message}`
-        );
-
+        pdvMensagem(`Não foi possível concluir a venda: ${erro.message}`);
     } finally {
         pdvVendaEmAndamento = false;
         pdvMostrarCarrinho();
+    }
+}
+
+
+// Inteligência Artificial: análise sob demanda, sem atualização automática de preços.
+async function carregarTelaIA() {
+    const seletor = document.getElementById("ia-produto");
+    const botao = document.getElementById("ia-analisar");
+    const mensagem = document.getElementById("ia-mensagem");
+    if (!seletor || !botao || !mensagem) return;
+
+    mensagem.textContent = "Carregando produtos...";
+    botao.disabled = true;
+    try {
+        const resposta = await buscarDados("/api/produtos");
+        const produtos = obterLista(resposta, "produtos");
+        const selecaoAnterior = seletor.value;
+        seletor.replaceChildren();
+        const inicial = document.createElement("option");
+        inicial.value = "";
+        inicial.textContent = "Selecione um produto";
+        seletor.appendChild(inicial);
+        for (const produto of produtos) {
+            const opcao = document.createElement("option");
+            opcao.value = String(produto.id_produto);
+            opcao.textContent = `${produto.nome} — ${formatarPreco(produto.preco_atual)}`;
+            seletor.appendChild(opcao);
+        }
+        if (produtos.some(p => String(p.id_produto) === selecaoAnterior)) {
+            seletor.value = selecaoAnterior;
+        }
+        mensagem.textContent = produtos.length
+            ? "Escolha um produto e clique em Analisar com IA."
+            : "Nenhum produto ativo encontrado.";
+        botao.disabled = !produtos.length;
+    } catch (erro) {
+        mensagem.textContent = `Erro ao carregar produtos: ${erro.message}`;
+    }
+
+    if (!botao.dataset.iaConfigurada) {
+        botao.addEventListener("click", analisarProdutoIA);
+        botao.dataset.iaConfigurada = "1";
+    }
+    await inicializarHistoricoIA();
+}
+
+async function analisarProdutoIA() {
+    const seletor = document.getElementById("ia-produto");
+    const botao = document.getElementById("ia-analisar");
+    const mensagem = document.getElementById("ia-mensagem");
+    const resultado = document.getElementById("ia-resultado");
+    const id = Number(seletor?.value);
+    if (!Number.isInteger(id) || id <= 0) {
+        mensagem.textContent = "Selecione um produto válido.";
+        return;
+    }
+
+    botao.disabled = true;
+    resultado.hidden = true;
+    mensagem.textContent = "Analisando produto...";
+    try {
+        const dados = await enviarDados(`/api/ia/produtos/${id}/analisar`, "POST", {});
+        atualizarTexto("ia-preco-atual", formatarPreco(dados.preco_atual));
+        atualizarTexto("ia-preco-sugerido", formatarPreco(dados.preco_sugerido));
+        atualizarTexto("ia-demanda", `${dados.demanda_prevista} unidade(s)`);
+        atualizarTexto("ia-confianca", `${(Number(dados.confianca) * 100).toFixed(0)}%`);
+        atualizarTexto("ia-variacao", `${Number(dados.variacao_percentual).toFixed(2)}%`);
+        atualizarTexto("ia-situacao", String(dados.situacao ?? "—").replaceAll("_", " "));
+        atualizarTexto("ia-motivo", dados.motivo ?? "Sem justificativa disponível.");
+        atualizarTexto("ia-id-analise", dados.id_analise ?? "—");
+        resultado.hidden = false;
+        mensagem.textContent = "Análise concluída. Nenhum preço foi alterado.";
+        await carregarHistoricoIA();
+    } catch (erro) {
+        mensagem.textContent = `Não foi possível analisar: ${erro.message}`;
+    } finally {
+        botao.disabled = false;
+    }
+}
+
+
+let historicoIAInicializado = false;
+
+async function inicializarHistoricoIA() {
+    const filtro = document.getElementById("ia-filtro-historico");
+    const atualizar = document.getElementById("ia-atualizar-historico");
+    if (!filtro || !atualizar) return;
+
+    if (!historicoIAInicializado) {
+        filtro.addEventListener("change", carregarHistoricoIA);
+        atualizar.addEventListener("click", carregarHistoricoIA);
+        historicoIAInicializado = true;
+    }
+
+    try {
+        const resposta = await buscarDados("/api/produtos");
+        const produtos = obterLista(resposta, "produtos");
+        const selecionado = filtro.value;
+        filtro.replaceChildren();
+        const todos = document.createElement("option");
+        todos.value = "";
+        todos.textContent = "Todos os produtos";
+        filtro.appendChild(todos);
+
+        for (const produto of produtos) {
+            const opcao = document.createElement("option");
+            opcao.value = String(produto.id_produto);
+            opcao.textContent = produto.nome;
+            filtro.appendChild(opcao);
+        }
+        if (produtos.some(produto => String(produto.id_produto) === selecionado)) {
+            filtro.value = selecionado;
+        }
+    } catch (erro) {
+        console.error("Erro ao carregar filtro do histórico:", erro);
+    }
+    await carregarHistoricoIA();
+}
+
+async function carregarHistoricoIA() {
+    const filtro = document.getElementById("ia-filtro-historico");
+    const corpo = document.getElementById("ia-historico-corpo");
+    const mensagem = document.getElementById("ia-historico-mensagem");
+    if (!corpo || !mensagem) return;
+
+    mensagem.textContent = "Carregando histórico...";
+    corpo.replaceChildren();
+
+    try {
+        const parametros = new URLSearchParams();
+        if (filtro?.value) parametros.set("id_produto", filtro.value);
+        const url = "/api/ia/historico" + (parametros.size ? `?${parametros}` : "");
+        const registros = await buscarDados(url);
+        if (!Array.isArray(registros)) throw new Error("Formato de resposta inválido.");
+
+        if (registros.length === 0) {
+            const celula = corpo.insertRow().insertCell();
+            celula.colSpan = 6;
+            celula.textContent = "Nenhuma análise encontrada.";
+        }
+
+        for (const registro of registros) {
+            const linha = corpo.insertRow();
+            let data = "—";
+            if (registro.data_hora) {
+                const instante = new Date(String(registro.data_hora).replace(" ", "T") + "Z");
+                data = Number.isNaN(instante.getTime())
+                    ? String(registro.data_hora)
+                    : instante.toLocaleString("pt-BR");
+            }
+            const confianca = registro.confianca == null
+                ? "—"
+                : `${(Number(registro.confianca) * 100).toFixed(0)}%`;
+            const preco = valor => valor == null ? "—" : formatarPreco(valor);
+            const valores = [
+                data,
+                registro.produto,
+                registro.demanda,
+                preco(registro.preco_analisado),
+                preco(registro.preco_recomendado),
+                confianca
+            ];
+            for (const valor of valores) {
+                linha.insertCell().textContent = String(valor ?? "—");
+            }
+        }
+        mensagem.textContent = `${registros.length} análise(s) encontrada(s).`;
+    } catch (erro) {
+        mensagem.textContent = `Erro ao carregar histórico: ${erro.message}`;
     }
 }
