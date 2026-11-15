@@ -1,5 +1,7 @@
 document.addEventListener("DOMContentLoaded", () => {
     configurarNavegacao();
+    configurarCaixaRapido();
+    configurarFiltrosGraficos();
     carregarDashboard();
 });
 
@@ -35,6 +37,10 @@ const CONFIGURACOES_SECOES = {
 let pdvProdutos = [];
 let pdvCarrinho = [];
 let pdvVendaEmAndamento = false;
+let dashboardVendasCache = [];
+let dashboardGraficoPontos = [];
+let dashboardProdutosRequisicao = 0;
+let dashboardDetalhesCache = new Map();
 
 function configurarNavegacao() {
     const menus = document.querySelectorAll(".menu-item");
@@ -196,7 +202,9 @@ async function carregarDashboard() {
             )
         );
 
+        dashboardVendasCache = vendas;
         renderizarGraficoVendas(vendas);
+        void carregarGraficoProdutosMaisVendidos(vendas);
         renderizarAlertasDashboard(estoque, etiquetas);
         mostrarProdutos(produtos);
 
@@ -869,6 +877,7 @@ function renderizarRegistroVenda(
                     mensagem: "A venda foi cancelada e o estoque foi restaurado.",
                     tipo: "sucesso"
                 });
+                dashboardDetalhesCache.clear();
                 await carregarSecao("vendas");
                 await carregarDashboard();
             } catch (erro) {
@@ -999,147 +1008,274 @@ async function carregarDetalhesVenda(idVenda, painel) {
     }
 }
 
-function renderizarGraficoVendas(vendas) {
-    const vendasAtivas = vendas.filter((venda) => {
-        return String(venda.status || "ATIVA").toUpperCase() === "ATIVA";
+function dashboardDataVenda(valor) {
+    if (!valor) return null;
+    // SQLite normalmente retorna YYYY-MM-DD HH:MM:SS em horário local.
+    const texto = String(valor).trim().replace(" ", "T");
+    const data = new Date(texto);
+    return Number.isNaN(data.getTime()) ? null : data;
+}
+
+function dashboardPeriodoDias() {
+    const dias = Number(document.getElementById("grafico-periodo")?.value || 7);
+    return [7, 30, 90].includes(dias) ? dias : 7;
+}
+
+function dashboardVendasPeriodo(vendas) {
+    const inicio = new Date();
+    inicio.setHours(0, 0, 0, 0);
+    inicio.setDate(inicio.getDate() - dashboardPeriodoDias() + 1);
+    return vendas.filter(venda => {
+        if (String(venda.status || "ATIVA").toUpperCase() !== "ATIVA") return false;
+        const data = dashboardDataVenda(venda.data_hora);
+        return data && data >= inicio && data <= new Date();
     });
+}
 
-    const total = vendasAtivas.reduce(
-        (soma, venda) => soma + (Number(venda.valor_total) || 0),
-        0
-    );
-
-    atualizarTexto("faturamento-total", formatarPreco(total));
-    atualizarTexto(
-        "ticket-medio",
-        formatarPreco(vendasAtivas.length ? total / vendasAtivas.length : 0)
-    );
-
-    const canvas = document.getElementById("grafico-vendas");
-    const mensagem = document.getElementById("grafico-vendas-mensagem");
-
-    if (!canvas) return;
-
-    const contexto = canvas.getContext("2d");
-    if (!contexto) {
-        if (mensagem) mensagem.textContent = "Não foi possível desenhar o gráfico.";
-        return;
+function configurarFiltrosGraficos() {
+    const seletor = document.getElementById("grafico-periodo");
+    if (seletor && !seletor.dataset.configurado) {
+        seletor.dataset.configurado = "1";
+        seletor.addEventListener("change", () => {
+            renderizarGraficoVendas(dashboardVendasCache);
+            void carregarGraficoProdutosMaisVendidos(dashboardVendasCache);
+        });
     }
-
-    const porDia = {};
-
-    vendasAtivas.forEach((venda) => {
-        if (!venda.data_hora) return;
-
-        const data = new Date(venda.data_hora);
-        if (Number.isNaN(data.getTime())) return;
-
-        const chave = [
-            data.getFullYear(),
-            String(data.getMonth() + 1).padStart(2, "0"),
-            String(data.getDate()).padStart(2, "0")
-        ].join("-");
-
-        porDia[chave] =
-            (porDia[chave] || 0) + (Number(venda.valor_total) || 0);
+    window.addEventListener("resize", () => {
+        if (!document.getElementById("dashboard-view")?.hidden) {
+            renderizarGraficoVendas(dashboardVendasCache);
+            renderizarGraficoProdutosMaisVendidos(dashboardUltimosProdutos);
+        }
     });
+}
 
-    const dias = Object.keys(porDia).sort().slice(-7);
-
-    if (mensagem) {
-        mensagem.textContent = dias.length
-            ? "Valores agrupados pelas datas das vendas registradas."
-            : "Ainda não há vendas com datas válidas para exibir no gráfico.";
-    }
-
+function dashboardPrepararCanvas(canvas) {
+    if (!canvas) return null;
     const largura = canvas.clientWidth;
     const altura = canvas.clientHeight;
-
-    if (!largura || !altura) return;
-
+    if (!largura || !altura) return null;
     const escala = window.devicePixelRatio || 1;
-    canvas.width = largura * escala;
-    canvas.height = altura * escala;
-
+    canvas.width = Math.round(largura * escala);
+    canvas.height = Math.round(altura * escala);
+    const contexto = canvas.getContext("2d");
+    if (!contexto) return null;
     contexto.setTransform(escala, 0, 0, escala, 0, 0);
     contexto.clearRect(0, 0, largura, altura);
+    return { contexto, largura, altura };
+}
 
-    const margem = { esquerda: 48, direita: 12, topo: 18, baixo: 34 };
-    const areaLargura = largura - margem.esquerda - margem.direita;
-    const areaAltura = altura - margem.topo - margem.baixo;
+function renderizarGraficoVendas(vendas) {
+    const ativas = vendas.filter(v => String(v.status || "ATIVA").toUpperCase() === "ATIVA");
+    const total = ativas.reduce((soma, v) => soma + (Number(v.valor_total) || 0), 0);
+    atualizarTexto("faturamento-total", formatarPreco(total));
+    atualizarTexto("ticket-medio", formatarPreco(ativas.length ? total / ativas.length : 0));
+    const canvas = document.getElementById("grafico-vendas");
+    const mensagem = document.getElementById("grafico-vendas-mensagem");
+    const area = dashboardPrepararCanvas(canvas);
+    if (!area) return;
+    const { contexto: ctx, largura, altura } = area;
+    const periodo = dashboardPeriodoDias();
+    const porDia = new Map();
+    const hoje = new Date();
+    hoje.setHours(0, 0, 0, 0);
+    for (let i = periodo - 1; i >= 0; i--) {
+        const dia = new Date(hoje);
+        dia.setDate(hoje.getDate() - i);
+        const chave = `${dia.getFullYear()}-${String(dia.getMonth()+1).padStart(2,"0")}-${String(dia.getDate()).padStart(2,"0")}`;
+        porDia.set(chave, 0);
+    }
+    dashboardVendasPeriodo(vendas).forEach(v => {
+        const data = dashboardDataVenda(v.data_hora);
+        const chave = `${data.getFullYear()}-${String(data.getMonth()+1).padStart(2,"0")}-${String(data.getDate()).padStart(2,"0")}`;
+        if (porDia.has(chave)) porDia.set(chave, porDia.get(chave) + (Number(v.valor_total) || 0));
+    });
+    const dias = [...porDia.keys()];
+    const valores = [...porDia.values()];
+    const maior = Math.max(1, ...valores);
+    const margem = { esquerda: 54, direita: 14, topo: 20, baixo: 35 };
+    const w = Math.max(1, largura - margem.esquerda - margem.direita);
+    const h = Math.max(1, altura - margem.topo - margem.baixo);
+    const corTexto = getComputedStyle(document.body).color || "#65748b";
+    ctx.font = "11px Segoe UI, Arial";
+    for (let i = 0; i <= 4; i++) {
+        const y = margem.topo + h * i / 4;
+        ctx.strokeStyle = "rgba(130,145,170,.22)";
+        ctx.beginPath(); ctx.moveTo(margem.esquerda, y); ctx.lineTo(largura - margem.direita, y); ctx.stroke();
+        ctx.textAlign = "right"; ctx.fillStyle = corTexto;
+        ctx.fillText((maior * (4-i)/4).toLocaleString("pt-BR", {notation:"compact",maximumFractionDigits:1}), margem.esquerda-8,y+4);
+    }
+    dashboardGraficoPontos = valores.map((valor, i) => ({
+        x: margem.esquerda + w * i / Math.max(1, dias.length-1),
+        y: margem.topo + h * (1-valor/maior), valor, dia: dias[i]
+    }));
+    ctx.beginPath();
+    dashboardGraficoPontos.forEach((p,i) => i ? ctx.lineTo(p.x,p.y) : ctx.moveTo(p.x,p.y));
+    ctx.strokeStyle = "#1264b5"; ctx.lineWidth = 2.5; ctx.lineJoin = "round"; ctx.stroke();
+    const intervalo = Math.max(1,Math.ceil(dias.length/7));
+    dashboardGraficoPontos.forEach((p,i) => {
+        if (periodo === 7 || i % intervalo === 0 || i === dias.length-1) {
+            ctx.beginPath(); ctx.arc(p.x,p.y,3,0,Math.PI*2); ctx.fillStyle="#24c5dd"; ctx.fill();
+            ctx.fillStyle=corTexto; ctx.textAlign="center";
+            ctx.fillText(`${p.dia.slice(8,10)}/${p.dia.slice(5,7)}`,p.x,altura-10);
+        }
+    });
+    if (mensagem) mensagem.textContent = "Passe o cursor pelo gráfico para consultar os valores diários.";
+    if (canvas && !canvas.dataset.interativo) {
+        canvas.dataset.interativo="1";
+        canvas.addEventListener("mousemove", evento => {
+            if (!dashboardGraficoPontos.length) return;
+            const rect=canvas.getBoundingClientRect();
+            const x=evento.clientX-rect.left;
+            const ponto=dashboardGraficoPontos.reduce((a,b) => Math.abs(a.x-x)<Math.abs(b.x-x)?a:b);
+            if (mensagem) mensagem.textContent=`${ponto.dia.slice(8,10)}/${ponto.dia.slice(5,7)}/${ponto.dia.slice(0,4)}: ${formatarPreco(ponto.valor)}`;
+        });
+        canvas.addEventListener("mouseleave", () => {
+            if (mensagem) mensagem.textContent="Passe o cursor pelo gráfico para consultar os valores diários.";
+        });
+    }
+}
 
-    if (!dias.length) {
-        contexto.fillStyle = "#8790a3";
-        contexto.font = "13px Segoe UI, Arial";
-        contexto.textAlign = "center";
-        contexto.fillText("Sem dados disponíveis", largura / 2, altura / 2);
+let dashboardUltimosProdutos = [];
+async function carregarGraficoProdutosMaisVendidos(vendas) {
+    const numero = ++dashboardProdutosRequisicao;
+    const mensagem = document.getElementById("grafico-produtos-mensagem");
+    const filtradas = dashboardVendasPeriodo(vendas);
+    if (mensagem) mensagem.textContent = "Calculando produtos mais vendidos...";
+    const acumulado = new Map();
+    // A API de vendas fornece os itens pelo endpoint de detalhes de cada venda.
+    // Cache local evita repetir consultas de vendas já consultadas.
+    const pendentes = filtradas.filter(v => v.id_venda != null && !dashboardDetalhesCache.has(String(v.id_venda)));
+    for (let i=0; i<pendentes.length; i+=8) {
+        const lote=pendentes.slice(i,i+8);
+        await Promise.all(lote.map(async v => {
+            try {
+                const detalhes=await buscarDados(`/api/vendas/${encodeURIComponent(v.id_venda)}`);
+                dashboardDetalhesCache.set(String(v.id_venda), detalhes);
+            } catch (erro) {
+                console.warn("Falha ao consultar itens da venda", v.id_venda, erro);
+            }
+        }));
+        if (numero !== dashboardProdutosRequisicao) return;
+    }
+    let falhas=0;
+    filtradas.forEach(v => {
+        const detalhe=dashboardDetalhesCache.get(String(v.id_venda));
+        if (!detalhe) {falhas++;return;}
+        (Array.isArray(detalhe.itens)?detalhe.itens:[]).forEach(item => {
+            const nome=String(item.nome || item.codigo_barras || "Produto sem nome");
+            const chave=String(item.codigo_barras || nome);
+            const anterior=acumulado.get(chave) || {nome,quantidade:0};
+            anterior.quantidade+=Number(item.quantidade)||0;
+            acumulado.set(chave,anterior);
+        });
+    });
+    if (numero !== dashboardProdutosRequisicao) return;
+    dashboardUltimosProdutos=[...acumulado.values()].sort((a,b)=>b.quantidade-a.quantidade).slice(0,5);
+    renderizarGraficoProdutosMaisVendidos(dashboardUltimosProdutos);
+    if (mensagem) mensagem.textContent = falhas
+        ? `Dados parciais: não foi possível consultar ${falhas} venda(s).`
+        : dashboardUltimosProdutos.length ? "Top 5 por unidades vendidas no período." : "Nenhuma venda com itens neste período.";
+}
+
+function renderizarGraficoProdutosMaisVendidos(produtos) {
+    const area=dashboardPrepararCanvas(document.getElementById("grafico-produtos-mais-vendidos"));
+    if (!area) return;
+    const {contexto:ctx,largura,altura}=area;
+    const corTexto=getComputedStyle(document.body).color || "#65748b";
+    if (!produtos.length) {
+        ctx.fillStyle=corTexto;ctx.font="13px Segoe UI, Arial";ctx.textAlign="center";
+        ctx.fillText("Sem dados disponíveis",largura/2,altura/2);return;
+    }
+    const margem=12;
+    const max=Math.max(1,...produtos.map(p=>p.quantidade));
+    const alturaLinha=Math.min(55,(altura-2*margem)/produtos.length);
+    const espacoRotulo=Math.min(160,Math.max(95,largura*.32));
+    produtos.forEach((produto,i)=>{
+        const y=margem+i*alturaLinha;
+        ctx.fillStyle=corTexto;ctx.textAlign="left";ctx.font="12px Segoe UI, Arial";
+        let nome=produto.nome;
+        while(nome.length>3 && ctx.measureText(nome).width>espacoRotulo-10) nome=nome.slice(0,-2)+"…";
+        ctx.fillText(nome,margem,y+alturaLinha*.55);
+        const x=margem+espacoRotulo;
+        const larguraBarra=Math.max(0,largura-x-55);
+        ctx.fillStyle="rgba(130,145,170,.15)";
+        ctx.fillRect(x,y+alturaLinha*.2,larguraBarra,alturaLinha*.5);
+        ctx.fillStyle=i===0?"#1264b5":"#24c5dd";
+        ctx.fillRect(x,y+alturaLinha*.2,larguraBarra*produto.quantidade/max,alturaLinha*.5);
+        ctx.fillStyle=corTexto;ctx.textAlign="right";
+        ctx.fillText(String(produto.quantidade),largura-margem,y+alturaLinha*.55);
+    });
+}
+
+function configurarCaixaRapido() {
+    const botao = document.getElementById("pdv-alternar-rapido");
+    const indicador = document.getElementById("pdv-modo-indicador");
+    const view = document.getElementById("caixa-view");
+    if (!botao || !view) {
+        console.warn("Caixa Rápido: botão ou seção do PDV não encontrados.");
         return;
     }
 
-    const valores = dias.map((dia) => porDia[dia]);
-    const maiorValor = Math.max(...valores, 1);
-
-    contexto.font = "10px Segoe UI, Arial";
-    contexto.textAlign = "right";
-
-    for (let indice = 0; indice <= 4; indice++) {
-        const y = margem.topo + areaAltura * indice / 4;
-        const valor = maiorValor * (4 - indice) / 4;
-
-        contexto.strokeStyle = "#e9edf4";
-        contexto.lineWidth = 1;
-        contexto.beginPath();
-        contexto.moveTo(margem.esquerda, y);
-        contexto.lineTo(largura - margem.direita, y);
-        contexto.stroke();
-
-        contexto.fillStyle = "#8790a3";
-        contexto.fillText(
-            valor.toLocaleString("pt-BR", {
-                notation: "compact",
-                maximumFractionDigits: 1
-            }),
-            margem.esquerda - 8,
-            y + 4
-        );
+    function atualizarModo(ativo) {
+        document.body.classList.toggle("caixa-rapido", ativo);
+        botao.setAttribute("aria-pressed", String(ativo));
+        botao.textContent = ativo ? "✕ Sair do Caixa Rápido" : "⚡ Ativar Caixa Rápido";
+        if (indicador) indicador.textContent = ativo ? "⚡ CAIXA RÁPIDO ATIVO" : "Modo normal";
+        if (ativo) document.getElementById("pdv-busca")?.focus();
     }
 
-    const pontos = valores.map((valor, indice) => {
-        const x = dias.length === 1
-            ? margem.esquerda + areaLargura / 2
-            : margem.esquerda +
-              areaLargura * indice / (dias.length - 1);
-        const y = margem.topo + areaAltura * (1 - valor / maiorValor);
-
-        return { x, y };
+    botao.addEventListener("click", () => {
+        atualizarModo(!document.body.classList.contains("caixa-rapido"));
     });
 
-    if (pontos.length > 1) {
-        contexto.beginPath();
-        contexto.moveTo(pontos[0].x, pontos[0].y);
+    document.addEventListener("keydown", (evento) => {
+        if (view.hidden || evento.repeat || evento.isComposing) return;
+        if (evento.ctrlKey || evento.metaKey) return;
 
-        pontos.slice(1).forEach((ponto) => {
-            contexto.lineTo(ponto.x, ponto.y);
-        });
+        const tecla = evento.key.toLowerCase();
+        const buscar = !evento.altKey && tecla === "f2"
+            || evento.altKey && tecla === "q" && !evento.shiftKey;
+        const finalizarAtalho = !evento.altKey && tecla === "f4"
+            || evento.altKey && tecla === "enter" && !evento.shiftKey;
 
-        contexto.strokeStyle = "#6558e8";
-        contexto.lineWidth = 3;
-        contexto.lineJoin = "round";
-        contexto.stroke();
-    }
+        if (buscar) {
+            evento.preventDefault();
+            evento.stopPropagation();
+            const campo = document.getElementById("pdv-busca");
+            if (campo) {
+                campo.focus();
+                campo.select();
+            }
+            return;
+        }
 
-    pontos.forEach((ponto, indice) => {
-        contexto.beginPath();
-        contexto.arc(ponto.x, ponto.y, 4, 0, Math.PI * 2);
-        contexto.fillStyle = "#6558e8";
-        contexto.fill();
+        if (finalizarAtalho) {
+            evento.preventDefault();
+            evento.stopPropagation();
+            const finalizar = document.getElementById("pdv-finalizar");
+            const modal = document.getElementById("pdv-modal-confirmacao");
+            const modalAberto = modal && !modal.hidden;
+            if (finalizar && !finalizar.disabled && !modalAberto) {
+                finalizar.click();
+            }
+            return;
+        }
 
-        contexto.fillStyle = "#8790a3";
-        contexto.textAlign = "center";
-
-        const [ano, mes, dia] = dias[indice].split("-");
-        contexto.fillText(`${dia}/${mes}`, ponto.x, altura - 10);
-    });
+        if (tecla === "escape" && !evento.altKey && document.body.classList.contains("caixa-rapido")) {
+            // Verifica os overlays, não os diálogos internos: um diálogo pode
+            // parecer visível no CSS mesmo com o elemento pai oculto.
+            const modalVenda = document.getElementById("pdv-modal-confirmacao");
+            const modalSistema = document.getElementById("dynaprice-dialogo");
+            const modalAberto = [modalVenda, modalSistema].some(
+                overlay => overlay && !overlay.hidden && getComputedStyle(overlay).display !== "none"
+            );
+            if (!modalAberto) {
+                evento.preventDefault();
+                evento.stopPropagation();
+                atualizarModo(false);
+            }
+        }
+    }, true);
 }
 
 function renderizarAlertasDashboard(estoque, etiquetas) {
@@ -1454,6 +1590,7 @@ async function pdvFinalizarVenda() {
             }))
         });
 
+        dashboardDetalhesCache.clear();
         const itensComprovante = pdvCarrinho.map((item) => ({ ...item }));
         pdvCarrinho = [];
         pdvMostrarCarrinho();
