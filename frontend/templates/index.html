@@ -9,6 +9,7 @@
   <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet"/>
   <script defer="" src="{{ url_for('static', filename='js/script.js') }}">
   </script>
+  <script defer src="{{ url_for('static', filename='js/tema.js') }}"></script>
  </head>
  <body>
   <aside class="sidebar" id="sidebar">
@@ -101,16 +102,27 @@
       </p>
      </div>
     </div>
-    <div class="user-badge">
+    <div class="topbar-actions">
+    <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Ativar modo claro" aria-pressed="true" title="Alternar tema">
+     <span class="theme-toggle-icon" aria-hidden="true">☀️</span>
+     <span class="theme-toggle-label">Modo claro</span>
+    </button>
+   <div class="user-badge">
      DP
     </div>
+   </div>
    </header>
    <div class="page-view" id="dashboard-view">
     <section class="dashboard-banner" aria-label="Banner do DynaPrice">
      <img
       src="{{ url_for('static', filename='img/banner.png') }}"
       alt="Banner do painel DynaPrice"
-      class="dashboard-banner-imagem"
+      class="dashboard-banner-imagem dashboard-banner-claro"
+     />
+     <img
+      src="{{ url_for('static', filename='img/banner_dark.png') }}"
+      alt="Banner do painel DynaPrice em modo escuro"
+      class="dashboard-banner-imagem dashboard-banner-escuro"
      />
     </section>
     <section class="section-heading">
@@ -222,12 +234,33 @@
         </strong>
        </div>
       </div>
+      <div class="dashboard-grafico-filtros">
+       <label for="grafico-periodo">Período do gráfico</label>
+       <select id="grafico-periodo" aria-label="Selecionar período do gráfico">
+        <option value="7">Últimos 7 dias</option>
+        <option value="30">Últimos 30 dias</option>
+        <option value="90">Últimos 90 dias</option>
+       </select>
+      </div>
       <div class="chart-container">
        <canvas aria-label="Gráfico de faturamento diário" id="grafico-vendas" role="img">
        </canvas>
       </div>
       <p class="chart-message" id="grafico-vendas-mensagem">
       </p>
+     </article>
+     <article class="panel chart-panel" id="painel-produtos-mais-vendidos">
+      <div class="panel-heading">
+       <div>
+        <h2>Produtos mais vendidos</h2>
+        <p>Quantidade vendida por produto no período selecionado</p>
+       </div>
+       <span class="panel-symbol" aria-hidden="true">▥</span>
+      </div>
+      <div class="chart-container">
+       <canvas id="grafico-produtos-mais-vendidos" role="img" aria-label="Gráfico dos produtos mais vendidos"></canvas>
+      </div>
+      <p class="chart-message" id="grafico-produtos-mensagem" aria-live="polite"></p>
      </article>
      <article class="panel alerts-panel">
       <div class="panel-heading">
@@ -516,6 +549,11 @@
        Registre vendas e acompanhe os itens da compra.
       </p>
      </div>
+    </div>
+    <div class="pdv-modo-toolbar">
+     <button id="pdv-alternar-rapido" class="secondary-button" type="button" aria-pressed="false" aria-controls="caixa-view">⚡ Ativar Caixa Rápido</button>
+     <span id="pdv-modo-indicador" aria-live="polite">Modo normal</span>
+     <span class="pdv-atalhos-ajuda">Atalhos: F2 buscar · F4 finalizar · Esc fechar</span>
     </div>
     <div class="pdv-layout">
      <section class="panel pdv-products">
