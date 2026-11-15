@@ -1577,3 +1577,34 @@ footer {
     .ia-historico-cabecalho button { width: 100%; }
     .ia-historico-tabela { min-width: 720px; }
 }
+
+
+.ia-decisao {
+    margin-top: 20px;
+    padding: 16px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--primary-soft);
+}
+
+.ia-decisao p {
+    margin-bottom: 12px;
+    color: var(--text);
+    font-size: 13px;
+}
+
+.ia-decisao-botoes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+@media (max-width: 700px) {
+    .ia-decisao-botoes {
+        flex-direction: column;
+    }
+
+    .ia-decisao-botoes button {
+        width: 100%;
+    }
+}
