@@ -1,11 +1,3 @@
-
-
-
-
-
-
-
-
 document.addEventListener("DOMContentLoaded", () => {
     configurarNavegacao();
     carregarDashboard();
