@@ -659,11 +659,13 @@ function mostrarFormularioProduto(area, produto, aoSalvar) {
                 await enviarDados("/api/produtos", "POST", dados);
             }
 
-            alert(
-                editando
-                    ? "Produto atualizado com sucesso!"
-                    : "Produto cadastrado com sucesso!"
-            );
+            await dpAviso({
+                titulo: editando ? "Produto atualizado!" : "Produto cadastrado!",
+                mensagem: editando
+                    ? "As informações foram salvas com sucesso."
+                    : "O produto foi cadastrado com sucesso.",
+                tipo: "sucesso"
+            });
 
             area.replaceChildren();
             await aoSalvar();
@@ -795,6 +797,44 @@ function renderizarRegistroVenda(
 
     acoes.appendChild(botaoDetalhes);
 
+    if (registro.id_venda != null) {
+        const botaoSegundaVia = criarElemento(
+            "button", "btn-secondary", "2ª via da notinha"
+        );
+        botaoSegundaVia.type = "button";
+        botaoSegundaVia.addEventListener("click", async () => {
+            // Abrir a janela diretamente no clique evita bloqueio de pop-ups.
+            const janela = window.open("", "_blank", "width=420,height=700");
+            if (!janela) {
+                await dpAviso({
+                    titulo: "Impressão bloqueada",
+                    mensagem: "Permita pop-ups para abrir a segunda via do comprovante.",
+                    tipo: "erro"
+                });
+                return;
+            }
+            botaoSegundaVia.disabled = true;
+            botaoSegundaVia.textContent = "Preparando...";
+            try {
+                const venda = await buscarDados(
+                    `/api/vendas/${encodeURIComponent(registro.id_venda)}`
+                );
+                pdvImprimirSegundaVia(venda, janela);
+            } catch (erro) {
+                janela.close();
+                await dpAviso({
+                    titulo: "Não foi possível emitir a segunda via",
+                    mensagem: erro.message,
+                    tipo: "erro"
+                });
+            } finally {
+                botaoSegundaVia.disabled = false;
+                botaoSegundaVia.textContent = "2ª via da notinha";
+            }
+        });
+        acoes.appendChild(botaoSegundaVia);
+    }
+
     if (status === "ATIVA" && registro.id_venda != null) {
         const botaoCancelar = criarElemento(
             "button",
@@ -804,9 +844,13 @@ function renderizarRegistroVenda(
 
         botaoCancelar.type = "button";
         botaoCancelar.addEventListener("click", async () => {
-            const confirmar = window.confirm(
-                `Deseja realmente cancelar a venda #${registro.id_venda}? O estoque será restaurado.`
-            );
+            const confirmar = await dpConfirmar({
+                titulo: `Cancelar venda #${registro.id_venda}?`,
+                mensagem: "Esta ação cancelará a venda e devolverá os produtos ao estoque.",
+                tipo: "perigo",
+                textoConfirmar: "Cancelar venda",
+                textoCancelar: "Voltar"
+            });
 
             if (!confirmar) return;
 
@@ -820,12 +864,20 @@ function renderizarRegistroVenda(
                     {}
                 );
 
-                alert("Venda cancelada com sucesso!");
+                await dpAviso({
+                    titulo: "Venda cancelada!",
+                    mensagem: "A venda foi cancelada e o estoque foi restaurado.",
+                    tipo: "sucesso"
+                });
                 await carregarSecao("vendas");
                 await carregarDashboard();
             } catch (erro) {
                 console.error("Erro ao cancelar venda:", erro);
-                alert(`Não foi possível cancelar a venda: ${erro.message}`);
+                await dpAviso({
+                    titulo: "Erro ao cancelar venda",
+                    mensagem: `Não foi possível cancelar a venda: ${erro.message}`,
+                    tipo: "erro"
+                });
                 botaoCancelar.disabled = false;
                 botaoCancelar.textContent = "Cancelar venda";
             }
@@ -1375,8 +1427,22 @@ async function pdvFinalizarVenda() {
         return;
     }
 
+    const totalVenda = pdvCarrinho.reduce(
+        (total, item) => total + Number(item.preco) * Number(item.quantidade), 0
+    );
+    const quantidadeItens = pdvCarrinho.reduce(
+        (total, item) => total + Number(item.quantidade), 0
+    );
+
+    // Bloqueia tentativas paralelas enquanto o operador confirma.
     pdvVendaEmAndamento = true;
     if (finalizar) finalizar.disabled = true;
+    const pagamento = await pdvConfirmarVendaModal(quantidadeItens, totalVenda);
+    if (!pagamento) {
+        pdvVendaEmAndamento = false;
+        pdvMostrarCarrinho();
+        return;
+    }
 
     pdvMensagem("Registrando venda...");
 
@@ -1388,8 +1454,10 @@ async function pdvFinalizarVenda() {
             }))
         });
 
+        const itensComprovante = pdvCarrinho.map((item) => ({ ...item }));
         pdvCarrinho = [];
         pdvMostrarCarrinho();
+        pdvImprimirComprovante(resposta, itensComprovante, pagamento);
 
         pdvMensagem(
             `Venda #${resposta.id_venda} registrada com sucesso! Total: ${pdvMoeda(resposta.valor_total)}`
@@ -1610,23 +1678,25 @@ async function decidirPrecoIA(acao) {
     const descricao = acao === "aprovar"
         ? `Confirmar a alteração do preço de ${formatarPreco(analiseAtualIA.preco_atual)} para ${formatarPreco(analiseAtualIA.preco_sugerido)}?`
         : "Confirmar a rejeição desta recomendação?";
-    if (!window.confirm(descricao)) return;
+    const confirmado = await dpConfirmar({
+        titulo: acao === "aprovar" ? "Aprovar preço sugerido?" : "Rejeitar recomendação?",
+        mensagem: acao === "aprovar"
+            ? descricao
+            : "A recomendação será rejeitada e o preço do produto permanecerá inalterado.",
+        tipo: acao === "aprovar" ? "info" : "info",
+        textoConfirmar: acao === "aprovar" ? "Aprovar preço" : "Confirmar rejeição",
+        textoCancelar: "Voltar"
+    });
+    if (!confirmado) return;
     aprovar.disabled = true;
     rejeitar.disabled = true;
     status.textContent = "Registrando decisão...";
     try {
         const resposta = await enviarDados(`/api/ia/analises/${id}/${acao}`, "POST", {});
-        status.textContent =
-            resposta.mensagem || "Decisão registrada.";
-
+        status.textContent = resposta.mensagem || "Decisão registrada.";
         const painelDecisao = document.getElementById("ia-decisao");
-
-        if (painelDecisao) {
-            painelDecisao.hidden = true;
-        }
-
+        if (painelDecisao) painelDecisao.hidden = true;
         analiseAtualIA = null;
-
         await carregarHistoricoIA();
         if (acao === "aprovar") {
             await carregarTelaIA();
@@ -1636,4 +1706,242 @@ async function decidirPrecoIA(acao) {
         aprovar.disabled = acao === "aprovar" && Math.round(Number(analiseAtualIA.preco_atual) * 100) === Math.round(Number(analiseAtualIA.preco_sugerido) * 100);
         rejeitar.disabled = false;
     }
+}
+
+
+function pdvConfirmarVendaModal(quantidade, total) {
+    return new Promise((resolver) => {
+        const modal = document.getElementById("pdv-modal-confirmacao");
+        const confirmar = document.getElementById("pdv-modal-confirmar");
+        const cancelar = document.getElementById("pdv-modal-cancelar");
+        const fechar = document.getElementById("pdv-modal-fechar");
+        const forma = document.getElementById("pdv-forma-pagamento");
+        const campoDinheiro = document.getElementById("pdv-campo-dinheiro");
+        const recebido = document.getElementById("pdv-valor-recebido");
+        const aviso = document.getElementById("pdv-pagamento-aviso");
+        if (![modal, confirmar, cancelar, fechar, forma, campoDinheiro, recebido, aviso].every(Boolean)) {
+            pdvMensagem("A janela de pagamento não está disponível.");
+            resolver(null);
+            return;
+        }
+        const centavos = (valor) => Math.round(Number(valor) * 100);
+        const totalCentavos = centavos(total);
+        atualizarTexto("pdv-modal-itens", quantidade);
+        atualizarTexto("pdv-modal-subtotal", pdvMoeda(total));
+        atualizarTexto("pdv-modal-total", pdvMoeda(total));
+        forma.value = "dinheiro";
+        recebido.value = "";
+        aviso.textContent = "Informe o valor recebido para continuar.";
+        const focoAnterior = document.activeElement;
+        modal.hidden = false;
+        let concluido = false;
+        function atualizarPagamento() {
+            const dinheiro = forma.value === "dinheiro";
+            campoDinheiro.hidden = !dinheiro;
+            const valor = recebido.value.trim() === "" ? NaN : Number(recebido.value);
+            const valido = Number.isFinite(valor) && valor >= 0 && centavos(valor) >= totalCentavos;
+            const troco = dinheiro && valido ? (centavos(valor) - totalCentavos) / 100 : 0;
+            atualizarTexto("pdv-troco", pdvMoeda(troco));
+            confirmar.disabled = dinheiro && !valido;
+            if (dinheiro) {
+                aviso.textContent = !Number.isFinite(valor) ? "Informe o valor recebido." :
+                    !valido ? "O valor recebido deve cobrir o total da venda." : "Troco calculado automaticamente.";
+            } else {
+                aviso.textContent = "Confirme o recebimento no meio de pagamento antes de finalizar. Este sistema não processa cobranças.";
+            }
+        }
+        function concluir(resultado) {
+            if (concluido) return;
+            concluido = true;
+            modal.hidden = true;
+            confirmar.removeEventListener("click", confirmarVenda);
+            cancelar.removeEventListener("click", cancelarVenda);
+            fechar.removeEventListener("click", cancelarVenda);
+            forma.removeEventListener("change", atualizarPagamento);
+            recebido.removeEventListener("input", atualizarPagamento);
+            modal.removeEventListener("click", clicarFora);
+            document.removeEventListener("keydown", pressionarTecla);
+            confirmar.disabled = false;
+            if (focoAnterior && typeof focoAnterior.focus === "function") focoAnterior.focus();
+            resolver(resultado);
+        }
+        function confirmarVenda() {
+            if (confirmar.disabled) return;
+            const dinheiro = forma.value === "dinheiro";
+            const valorRecebido = dinheiro ? Number(recebido.value) : total;
+            concluir({
+                forma: forma.value,
+                recebido: valorRecebido,
+                troco: dinheiro ? (centavos(valorRecebido) - totalCentavos) / 100 : 0
+            });
+        }
+        function cancelarVenda() { concluir(null); }
+        function clicarFora(evento) { if (evento.target === modal) cancelarVenda(); }
+        function pressionarTecla(evento) {
+            if (evento.key === "Escape") { evento.preventDefault(); cancelarVenda(); }
+            if (evento.key === "Tab") {
+                const elementos = [...modal.querySelectorAll("button:not(:disabled), select:not(:disabled), input:not(:disabled)")]
+                    .filter((el) => el.getClientRects().length);
+                if (!elementos.length) return;
+                const primeiro = elementos[0], ultimo = elementos[elementos.length - 1];
+                if (evento.shiftKey && document.activeElement === primeiro) {
+                    evento.preventDefault(); ultimo.focus();
+                } else if (!evento.shiftKey && document.activeElement === ultimo) {
+                    evento.preventDefault(); primeiro.focus();
+                }
+            }
+        }
+        confirmar.addEventListener("click", confirmarVenda);
+        cancelar.addEventListener("click", cancelarVenda);
+        fechar.addEventListener("click", cancelarVenda);
+        forma.addEventListener("change", atualizarPagamento);
+        recebido.addEventListener("input", atualizarPagamento);
+        modal.addEventListener("click", clicarFora);
+        document.addEventListener("keydown", pressionarTecla);
+        atualizarPagamento();
+        forma.focus();
+    });
+}
+
+function pdvImprimirComprovante(venda, itens, pagamento) {
+    const janela = window.open("", "_blank", "width=420,height=700");
+    if (!janela) {
+        pdvMensagem("Venda registrada, mas o navegador bloqueou o comprovante. Permita pop-ups para imprimir.");
+        return;
+    }
+    const escapar = (valor) => String(valor ?? "").replace(/[&<>"']/g, (caractere) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+    })[caractere]);
+    const nomes = { dinheiro: "Dinheiro", pix: "PIX", debito: "Cartão de débito", credito: "Cartão de crédito" };
+    const linhas = itens.map((item) => `<tr><td>${escapar(item.nome)}</td><td>${escapar(item.quantidade)}</td><td>${escapar(pdvMoeda(item.preco * item.quantidade))}</td></tr>`).join("");
+    const total = Number(venda.valor_total);
+    janela.document.open();
+    janela.document.write(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Comprovante #${escapar(venda.id_venda)}</title><style>
+        body{font:14px Arial,sans-serif;max-width:360px;margin:24px auto;color:#222}h2{text-align:center;margin-bottom:4px}
+        p{text-align:center}table{width:100%;border-collapse:collapse;margin:20px 0}th,td{padding:7px 3px;border-bottom:1px dashed #bbb;text-align:left}
+        td:last-child,th:last-child{text-align:right}.total{font-size:20px;font-weight:bold;display:flex;justify-content:space-between}
+        .linha{display:flex;justify-content:space-between;margin:8px 0}.nota{font-size:11px;color:#666}
+        @media print{button{display:none}body{margin:0 auto}}
+        </style></head><body><h2>DynaPrice</h2><p>Comprovante não fiscal<br>Venda #${escapar(venda.id_venda)}<br>${escapar(new Date().toLocaleString("pt-BR"))}</p>
+        <table><thead><tr><th>Produto</th><th>Qtd.</th><th>Subtotal</th></tr></thead><tbody>${linhas}</tbody></table>
+        <div class="total"><span>Total</span><span>${escapar(pdvMoeda(total))}</span></div>
+        <div class="linha"><span>Pagamento</span><strong>${escapar(nomes[pagamento.forma] || pagamento.forma)}</strong></div>
+        ${pagamento.forma === "dinheiro" ? `<div class="linha"><span>Recebido</span><strong>${escapar(pdvMoeda(pagamento.recebido))}</strong></div><div class="linha"><span>Troco</span><strong>${escapar(pdvMoeda(pagamento.troco))}</strong></div>` : ""}
+        <p class="nota">Forma de pagamento registrada somente neste comprovante; integração com banco de dados pendente.</p>
+        <button onclick="window.print()">Imprimir comprovante</button></body></html>`);
+    janela.document.close();
+}
+
+// Segunda via reconstruída a partir dos dados persistidos no banco.
+// A forma de pagamento não é exibida porque não é armazenada atualmente.
+function pdvImprimirSegundaVia(venda, janela) {
+    const escapar = (valor) => String(valor ?? "").replace(/[&<>"']/g, (caractere) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+    })[caractere]);
+    const itens = Array.isArray(venda.itens) ? venda.itens : [];
+    const linhas = itens.map((item) => {
+        const quantidade = Number(item.quantidade) || 0;
+        const unitario = Number(item.preco_unitario) || 0;
+        const subtotal = item.subtotal != null ? Number(item.subtotal) : quantidade * unitario;
+        return `<tr><td>${escapar(item.nome || "Produto")}</td><td>${escapar(quantidade)}</td><td>${escapar(pdvMoeda(unitario))}</td><td>${escapar(pdvMoeda(subtotal))}</td></tr>`;
+    }).join("");
+    const cancelada = String(venda.status || "ATIVA").toUpperCase() !== "ATIVA";
+    const dataOriginal = venda.data_hora || "Não informada";
+    janela.document.open();
+    janela.document.write(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
+        <title>2ª via - Venda #${escapar(venda.id_venda)}</title><style>
+        body{font:14px Arial,sans-serif;max-width:380px;margin:24px auto;color:#222}
+        h2,p{text-align:center}h2{margin-bottom:4px}table{width:100%;border-collapse:collapse;margin:20px 0}
+        th,td{padding:7px 3px;border-bottom:1px dashed #bbb;text-align:left}
+        th:not(:first-child),td:not(:first-child){text-align:right}
+        .total{font-size:20px;font-weight:bold;display:flex;justify-content:space-between}
+        .nota{font-size:11px;color:#666}.cancelada{font-weight:bold;color:#b42318}
+        @media print{button{display:none}body{margin:0 auto}}
+        </style></head><body><h2>DynaPrice</h2>
+        <p><strong>2ª VIA — COMPROVANTE NÃO FISCAL</strong><br>
+        Venda #${escapar(venda.id_venda)}<br>Data da venda: ${escapar(dataOriginal)}</p>
+        ${cancelada ? '<p class="cancelada">VENDA CANCELADA — SEM VALIDADE COMO COMPROVANTE DE PAGAMENTO</p>' : ''}
+        <table><thead><tr><th>Produto</th><th>Qtd.</th><th>Unit.</th><th>Subtotal</th></tr></thead>
+        <tbody>${linhas || '<tr><td colspan="4">Sem itens disponíveis</td></tr>'}</tbody></table>
+        <div class="total"><span>Total</span><span>${escapar(pdvMoeda(Number(venda.valor_total) || 0))}</span></div>
+        <p class="nota">Segunda via emitida a partir do histórico da venda.<br>
+        Forma de pagamento não disponível no histórico.</p>
+        <button type="button" onclick="window.print()">Imprimir segunda via</button>
+        </body></html>`);
+    janela.document.close();
+}
+
+// Modal reutilizável para avisos e confirmações, sem alert() ou confirm().
+let dpDialogoOcupado = false;
+
+function dpAbrirDialogo({ titulo, mensagem, tipo = "info", confirmar = false,
+                          textoConfirmar = "Entendi", textoCancelar = "Voltar" }) {
+    return new Promise((resolver) => {
+        const overlay = document.getElementById("dynaprice-dialogo");
+        const janela = overlay?.querySelector(".dp-dialogo");
+        const botaoSim = document.getElementById("dp-dialogo-confirmar");
+        const botaoNao = document.getElementById("dp-dialogo-cancelar");
+        const icone = document.getElementById("dp-dialogo-icone");
+        if (!overlay || !janela || !botaoSim || !botaoNao || !icone || dpDialogoOcupado) {
+            console.error("Diálogo indisponível ou já aberto:", titulo, mensagem);
+            resolver(false);
+            return;
+        }
+        dpDialogoOcupado = true;
+        const tipos = ["sucesso", "perigo", "erro", "info"];
+        const estilo = tipos.includes(tipo) ? tipo : "info";
+        janela.className = `dp-dialogo dp-dialogo--${estilo}`;
+        atualizarTexto("dp-dialogo-titulo", titulo);
+        atualizarTexto("dp-dialogo-descricao", mensagem);
+        icone.textContent = estilo === "sucesso" ? "✓" : estilo === "perigo" ? "!" : estilo === "erro" ? "×" : "i";
+        botaoSim.textContent = textoConfirmar;
+        botaoNao.textContent = textoCancelar;
+        botaoNao.hidden = !confirmar;
+        const focoAnterior = document.activeElement;
+        overlay.hidden = false;
+        (confirmar ? botaoNao : botaoSim).focus();
+        let finalizado = false;
+        function concluir(valor) {
+            if (finalizado) return;
+            finalizado = true;
+            overlay.hidden = true;
+            botaoSim.removeEventListener("click", aceitar);
+            botaoNao.removeEventListener("click", recusar);
+            overlay.removeEventListener("click", clicarFora);
+            document.removeEventListener("keydown", tecla);
+            dpDialogoOcupado = false;
+            if (focoAnterior?.isConnected && typeof focoAnterior.focus === "function") focoAnterior.focus();
+            resolver(valor);
+        }
+        function aceitar() { concluir(true); }
+        function recusar() { concluir(false); }
+        function clicarFora(evento) { if (evento.target === overlay && confirmar) recusar(); }
+        function tecla(evento) {
+            if (evento.key === "Escape") {
+                evento.preventDefault();
+                if (confirmar) recusar(); else aceitar();
+            }
+            if (evento.key === "Tab") {
+                const botoes = confirmar ? [botaoNao, botaoSim] : [botaoSim];
+                const indice = botoes.indexOf(document.activeElement);
+                if (evento.shiftKey && indice <= 0) {
+                    evento.preventDefault(); botoes[botoes.length - 1].focus();
+                } else if (!evento.shiftKey && indice === botoes.length - 1) {
+                    evento.preventDefault(); botoes[0].focus();
+                }
+            }
+        }
+        botaoSim.addEventListener("click", aceitar);
+        botaoNao.addEventListener("click", recusar);
+        overlay.addEventListener("click", clicarFora);
+        document.addEventListener("keydown", tecla);
+    });
+}
+
+function dpAviso(opcoes) {
+    return dpAbrirDialogo({ ...opcoes, confirmar: false });
+}
+
+function dpConfirmar(opcoes) {
+    return dpAbrirDialogo({ ...opcoes, confirmar: true });
 }
